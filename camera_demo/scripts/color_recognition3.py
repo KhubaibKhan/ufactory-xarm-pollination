@@ -37,7 +37,7 @@ labels = {0: '(0, 0)', 1: '(1, 0)', 2: '(-1, 0)', 3: '(-1, -1)', 4: '(0, 1)', 5:
 labels_reverse = {v:k for k,v in labels.items()}
 
 # Desired orientation in quaternions corresponding to the labels
-d_orientations = {0: [0, 0, 0], 1: [1.57, 0, 0], 2: [-1.57, 0, 0], 3: [-1.57, -0.78, 0], 4: [0, -1.57, 0], 5: [0, 1.57, 0], 6: [1.57, 0.78, 0], 7: [0.78, 1.57, 0], 8: [-0.78, -1.57, 0]}
+d_orientations = {0: [0, 0, 0], 1: [1.57, 0, 0], 2: [-1.57, 0, 0], 3: [-1.57, 0.78, 0], 4: [0, -1.57, 0], 5: [0, 1.57, 0], 6: [1.57, -0.78, 0], 7: [0.78, 1.57, 0], 8: [-0.78, -1.57, 0]}
 
 # Create the publisher
 twist_pub = rospy.Publisher('/servo_server/delta_twist_cmds', TwistStamped, queue_size=10) # Create publisher object
@@ -234,7 +234,7 @@ if __name__ == '__main__':
             # Convert quaternion to euler angles
             current_euler = tf.transformations.euler_from_quaternion([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
 
-            target_orientation = tf.transformations.quaternion_from_euler(*d_orientations[label_reverse])
+            # target_orientation = tf.transformations.quaternion_from_euler(*d_orientations[label_reverse])
             rotation_euler_angles = d_orientations[label_reverse]
 
             # Create rotation objects from the Euler angles
