@@ -34,12 +34,12 @@ class Realsense:
         self.depth = None
 
     # Function that gets depth from depth image
-    def get_depth(self, depth, xc, yc):
+    def get_depth(self, depth, xc, yc, hw):
         # Convert ROS image to OpenCV image
         cv_depth = cv_bridge.imgmsg_to_cv2(depth, 'passthrough')
 
-        # Get the average depth in the 5x5 region around the centroid
-        depth = np.mean(cv_depth[yc - 10:yc + 10, xc - 10:xc + 10])
+        # Get the average depth of the block
+        depth = np.mean(cv_depth[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)])
 
 
         # Return depth
@@ -81,8 +81,10 @@ def detect_color_block(image, color):
 
     if len(xyxy) == 0:
         return []
-    # Find the center of each xyxy box
+    # Find the center of each xyxy box and also the height and width
     centroids   = []
+    hw_list     = []
+
     for box in xyxy:
         xc = int((box[0] + box[2]) / 2)
         yc = int((box[1] + box[3]) / 2)
@@ -90,9 +92,24 @@ def detect_color_block(image, color):
         xc = int(xc * (original_size[1] / 640))
         yc = int(yc * (original_size[0] / 480))
 
-        centroids.append([xc, yc, box[4]])
+        hw_list.append([box[2] - box[0], box[3] - box[1]])
+        print("hw_list: ", box[2] - box[0], box[3] - box[1])
+
+        centroids.append([xc, yc, box[4], [box[2] - box[0], box[3] - box[1]]])
 
     return centroids
+
+# Function that finds the ratio between the flower bounding box and the image
+def find_ratio(image_size, hw_bounding_box):
+    # Find the area of the image
+    image_area = image_size[0] * image_size[1]
+    # Find the area of the bounding box
+    bounding_box_area = hw_bounding_box[0] * hw_bounding_box[1]
+
+    # Find the ratio between the image and the bounding box
+    ratio = image_area / bounding_box_area
+
+    return ratio
 
     # # Convert image to HSV format
     # cv_image_hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
@@ -167,15 +184,18 @@ def transform_3d_position(x, y, z, camera_frame, base_frame, tf_buffer):
     while transform is None:
         try:
             transform = tf_buffer.lookup_transform(base_frame, camera_frame, rospy.Time())
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
+            # print the exception
+            print(e)
             continue
+
 
     # Create point
     point = PointStamped()
     point.header.frame_id = camera_frame
     point.header.stamp = rospy.Time.now()
-    point.point.x = x
-    point.point.y = y
+    point.point.x = x 
+    point.point.y = y 
     point.point.z = z
 
     # Transform point
@@ -183,3 +203,34 @@ def transform_3d_position(x, y, z, camera_frame, base_frame, tf_buffer):
 
     # Return transformed point
     return transformed_point.point.x, transformed_point.point.y, transformed_point.point.z
+
+
+# Function that gets the 3d position of the camera with base frame
+def get_camera_position(camera_frame, base_frame, tf_buffer):
+    # Initialize transform
+    transform = None
+
+    # Wait for transform
+    while transform is None:
+        try:
+            transform = tf_buffer.lookup_transform(base_frame, camera_frame, rospy.Time())
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            continue
+
+    # Return transform
+    return transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z
+
+# Function that gets the transform between two frames
+def get_transform(frame1, frame2, tf_buffer):
+    # Initialize transform
+    transform = None
+
+    # Wait for transform
+    while transform is None:
+        try:
+            transform = tf_buffer.lookup_transform(frame1, frame2, rospy.Time())
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            continue
+
+    # Return transform
+    return transform

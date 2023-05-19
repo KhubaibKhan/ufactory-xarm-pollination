@@ -20,7 +20,6 @@ from std_msgs.msg import Header
 import moveit_commander
 from scipy.spatial.transform import Rotation
 import tf
-import transforms3d as tf3d
 
 warnings.filterwarnings("ignore")
 
@@ -41,50 +40,24 @@ d_orientations = {0: [0, 0, 0], 1: [1.57, 0, 0], 2: [-1.57, 0, 0], 3: [-1.57, 0.
 # Create the publisher
 twist_pub = rospy.Publisher('/servo_server/delta_twist_cmds', TwistStamped, queue_size=1) # Create publisher object
 
-# Image size
-image_size = (640, 480)
+# Image dimensions
+image_width = 640
+image_height = 480
 
-
-# get the calibration data from the yaml file
-def get_calibration_data(calibration_file):
-    '''
-    Get the calibration data from the yaml file
-    Yaml file has the following format:
-        qw: 0.7013088518485089
-        qx: 0.0039751934245023735
-        qy: -0.003477682492098677
-        qz: 0.7128379885223908
-        x: 0.0629845508606165
-        y: -0.03221690881661964
-        z: 0.019403200790438897
-    '''
-
-    with open(calibration_file) as file:
-        # The FullLoader parameter handles the conversion from YAML
-        # scalar values to Python the dictionary format
-        calibration_data = yaml.load(file, Loader=yaml.FullLoader)
-
-    # Get the camera matrix and distortion coefficients
-
-
-def position_error(current_position, target_position):
+def position_error(centroid):
     """
-    Computes the position error between two positions.
-    :param current_position: current position (3D vector)
-    :param target_position: target position (3D vector)
-    :return: position error as a 3D vector
+    calculate the position error between the centroid and the center of the image
     """
-    
-    # If the target position x, y and z are in a certain range, then the error is 0
-    # if np.linalg.norm(np.array(target_position) - np.array(current_position)) < 0.3:
-    #     return np.array([0, 0, 0])
-    # else:
-    #     return np.array(target_position) - np.array(current_position)
+    # Get the centroid
+    xc, yc, _ = centroid
 
-    # target_position[-2] = target_position[-2]*-1
-    error = np.array([target_position[0] - current_position[0], target_position[1] - current_position[1], target_position[2] - current_position[2]])
-    # error[1] = error[1] * -1
-    return error
+    # Get the error
+    x_error = xc - image_width / 2
+    y_error = yc - image_height / 2
+
+    # Return the error
+    return x_error, y_error
+
 
 if __name__ == '__main__':
     rospy.init_node('color_recognition_node', anonymous=False)
@@ -109,7 +82,6 @@ if __name__ == '__main__':
 
     # Define an initial pose
     starting_joints = [-0.00025873768026940525, -0.31601497530937195, -1.3658411502838135, 0.00034579072962515056, 1.6826152801513672, -0.0012134681455790997]
-    initial_position = [0.12740904092788696, -0.5061454772949219, -0.16231562197208405, 0.06283185631036758, -0.8237953782081604, 0.003490658476948738]
     # initial_pose = [0.370, 0.00, 0.400, 0.707, 0, 0, 0.707]
 
 
@@ -134,16 +106,8 @@ if __name__ == '__main__':
         else:
             print("Failed to go to the initial pose!")
             continue
-        # # Open the gripper
-        # ret = gripper.open()
-
-        # # wait for input key to start
-        # input("Press Enter to start the program...") 
-        # # close the gripper
-        # ret = gripper.close()
-        # # wait for gripper to close
-        # time.sleep(1)
-
+        # Open the gripper
+        ret = gripper.open()
         if ret:
             print("Open the gripper successfully!")
         else:
@@ -159,16 +123,16 @@ if __name__ == '__main__':
         print("Current joint values: ", current_joints)
 
         # pid for translational velocity
-        kp_t = 0.3
+        kp_t = 0.2
         ki_t = 0.01
-        kd_t = 0.001
+        kd_t = 0.01
 
         error_tra = np.array([0, 0, 0])
         prev_error_tra = np.array([0, 0, 0])
         integral_tra = np.array([0, 0, 0])
 
         # pid for rotational velocity
-        kp_r = 0.14
+        kp_r = 0.1
         ki_r = 0.01
         kd_r = 0.001
 
@@ -183,8 +147,6 @@ if __name__ == '__main__':
 
         # time step
         dt = 0.01
-        # time step for translational
-        dt_tr = 0.001
 
         # # initialize the error and integral
         # error = np.array([0, 0, 0, 0, 0, 0])
@@ -192,7 +154,7 @@ if __name__ == '__main__':
         # integral = np.array([0, 0, 0, 0, 0, 0])
 
         # tolerance for translational error
-        tolerance = 0.007
+        tolerance = 0.04
 
         label_list = []
         error_list = []
@@ -200,18 +162,14 @@ if __name__ == '__main__':
         while(True):
             print("start")
             start = time.time()
-            centroids = detect_color_block(realsense.image, color)
-            # Time taken by deep learning model in seconds
-            print("Time taken by deep learning model: ", time.time() - start, "seconds")
+            centroids, hw_list = detect_color_block(realsense.image, color)
+            print("Time taken: ", time.time() - start)
             if len(centroids) == 0:
                 continue
             print(centroids)
-            xc, yc, label, hw = centroids[0]
+            xc, yc, label = centroids[0]
+            hw = hw_list[0]
             label_reverse = labels_reverse[label]
-
-            # get the ratio between the size of the object and the image
-            ratio = find_ratio(image_size, hw)
-            ratio *= 4
 
             # label_ind = labels.keys()[labels.values().index(label)]
             # print("Centroid: ", xc, yc, label)
@@ -219,14 +177,10 @@ if __name__ == '__main__':
             #     break
             # Moving maximum of the last 30 labels
             label_list.append(label_reverse)
-            if label_reverse == 0:
-                time.sleep(30)
-                continue
             if len(label_list) > 10:
                 label_list.pop(0)
             else:
                 continue
-
             label_reverse = max(set(label_list), key=label_list.count)
 
             # if label_reverse == 0:
@@ -251,68 +205,33 @@ if __name__ == '__main__':
             # Convert the resulting rotation back to Euler angles
             target_euler = Rotation.from_matrix(resulting_rotation).as_euler('xyz')
 
-            # print("Current euler: ", current_euler)
-            # print("target euler: ", target_euler)
+            print("Current euler: ", current_euler)
+            print("target euler: ", target_euler)
 
             try:
-                depth = realsense.get_depth(realsense.depth, xc, yc, hw)
+                depth = realsense.get_depth(realsense.depth, xc, yc)
             except Exception as e:
                 print(e)
                 exit(0)
 
-            print("Ratio of the object and depth of the object: ", ratio, depth)
+            print("Get the 3d position.")
 
-            print("x, y, z before 3d position: ", xc, yc, depth)
-            # Get the 3D position of the block
-            x, y, z = get_3d_position(depth, xc, yc, realsense.camera_info)
-            print("x, y, z after 3d position for depth: ", x, y, z)
-            x, y, z = get_3d_position(ratio, xc, yc, realsense.camera_info)
-            print("x, y, z after 3d position for ratio: ", x, y, z)
+            # Current position of the end effector
+            current_position = [current_pose.position.x, current_pose.position.y, current_pose.position.z]
+            print("current position: ", current_position)
+            # get the current position of the camera
+            current_position = find_camera_location(current_position, tf_buffer)
 
-            # Transform 3D position from camera frame to base frame
-            # start = time.time()
-            x, y, z = transform_3d_position(x, y, z, 'camera_color_frame', 'link_base', tf_buffer=tf_buffer)
-
-            # print("time taken: ", time.time() - start)
-
-            # find the camera location in the base frame
-            current_position = get_camera_position('camera_color_frame', 'link_base', tf_buffer=tf_buffer)
-
-            target_position = [x, y, z]
-            # print("Current position: ", current_position)
-            # print("Target position: ", target_position)
-
+            print("Current position: ", current_position)
             # # Find the error between current position and desired position
-            pos_error = position_error(current_position, target_position)
-            start = time.time()
-            # pos_error = np.array(target_position) - np.array(current_position)
-            # print("Pose error before transforming: ", pos_error)
-            # Transform the error from base frame to end effector frame
-            # get the transform from base to link_eef
-            eef_R = get_transform('link_eef', 'link_base', tf_buffer=tf_buffer)
-            eef_R = np.array([eef_R.transform.rotation.x, eef_R.transform.rotation.y, eef_R.transform.rotation.z, eef_R.transform.rotation.w])
-            # print("Rotation quaternion eef: ", eef_R)
-            # the orientation of the link_base
-            base_R = np.array([0, 0, 0, 1])
-            # print("Rotation quaternion base: ", base_R)
-            # convert the orientation to a rotation matrix
-            base_R = Rotation.from_quat(base_R).as_matrix()
-            eef_R = Rotation.from_quat(eef_R).as_matrix()
-            # get the rotation matrix from link_base to link_eef
-            R = eef_R.dot(base_R.T)
-            print("Rotation matrix: ", R)
-            # transform the error from base frame to end effector frame
-            pos_error = R.dot(pos_error)
-            print("Pose error after transforming: ", pos_error)
-            print("Time taken by translation error: ", time.time() - start, "seconds")
+            pos_error = position_error(centroids[0])
 
-            if np.linalg.norm(pos_error[-1]) < 0.1:
-                pos_error[-1] = 0
+            # pos_error = np.array(target_position) - np.array(current_position)
+            print("Position error: ", pos_error)
 
             if np.linalg.norm(pos_error) < tolerance:
-                print(np.linalg.norm(pos_error) < tolerance)
                 pos_error = [0, 0, 0]
-            print("Position error: ", pos_error)
+
             # convert the error to a numpy array
             pos_error = np.array(pos_error)
 
@@ -325,16 +244,16 @@ if __name__ == '__main__':
 
             # Convert the matrix difference back to Euler angles
             error = Rotation.from_matrix(rotation_difference).as_euler('xyz')
-
+            print("Orientation error: ", error)
             if label_reverse == 0:
                 error = np.array([0, 0, 0])
-            # print("Orientation error: ", error)
+
             # PID for positional control
             # compute the integral of the error using the trapezoidal rule
-            integral_tra = integral_tra + 0.5 * (pos_error + prev_error_tra) * dt_tr
+            integral_tra = integral_tra + 0.5 * (pos_error + prev_error_tra) * dt
 
             # compute the derivative of the error using the backward difference method
-            derivative = (pos_error - prev_error_tra) / dt_tr
+            derivative = (pos_error - prev_error_tra) / dt
 
             # compute the PID control signal
             control_signal_tra = kp_t * pos_error + ki_t * integral_tra + kd_t * derivative
@@ -372,23 +291,6 @@ if __name__ == '__main__':
             # print("Translational velocity: ", vel)
 
             # Publish the angular velocity to /servo_server/delta_twist_cmds topic
-            twist_stamped = TwistStamped() # Create TwistStamped message object
-            twist_stamped.header.stamp = rospy.Time.now()
-            twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
-
-            twist_stamped.twist.linear.x = vel[0]
-            twist_stamped.twist.linear.y = vel[1]
-            twist_stamped.twist.linear.z = vel[2]
-            twist_stamped.twist.angular.x = 0
-            twist_stamped.twist.angular.y = 0
-            twist_stamped.twist.angular.z = 0
-            # twist_stamped.twist.angular.x = angular_velocity[0]
-            # twist_stamped.twist.angular.y = angular_velocity[1]
-            # twist_stamped.twist.angular.z = angular_velocity[2]
-
-            twist_pub.publish(twist_stamped)
-
-
             twist_stamped = TwistStamped() # Create TwistStamped message object
             twist_stamped.header.stamp = rospy.Time.now()
             twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
