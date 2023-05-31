@@ -21,6 +21,7 @@ import moveit_commander
 from scipy.spatial.transform import Rotation
 import tf
 import transforms3d as tf3d
+import csv
 
 warnings.filterwarnings("ignore")
 
@@ -110,6 +111,9 @@ if __name__ == '__main__':
     # Define an initial pose
     starting_joints = [-0.00025873768026940525, -0.31601497530937195, -1.3658411502838135, 0.00034579072962515056, 1.6826152801513672, -0.0012134681455790997]
     initial_position = [0.12740904092788696, -0.5061454772949219, -0.16231562197208405, 0.06283185631036758, -0.8237953782081604, 0.003490658476948738]
+    initial_position2 = [0.17664214968681335, -0.17604023218154907, -1.2110868692398071, -1.0321168899536133, 1.580592155456543, 0.24543769657611847]
+    initial_position3 = [-0.004821084439754486, -0.1753533035516739, -1.3093904256820679, 0.049373093992471695, 1.4882516860961914, -1.5750622749328613]
+
     # initial_pose = [0.370, 0.00, 0.400, 0.707, 0, 0, 0.707]
 
 
@@ -118,6 +122,30 @@ if __name__ == '__main__':
     color = (0, 0, 255)
     realsense = Realsense()
     cnts = 0
+
+    # Store depth values for every successfull loop
+    depth_success = []
+    # x, y, z with real depth
+    xyz_depth = []
+    # x, y, z with size depth
+    xyz_size = []
+    # Store error values
+    error_or = []
+    error_pos = []
+    # camera position change
+    camera_pos = []
+    # time
+    time_list = []
+    # translational and rotational velocities
+    vel_tra = []
+    vel_rot = []
+    # translational and rotational error separate
+    error_tra_sep = []
+    error_rot_sep = []
+
+    # store time
+    time_1_success = []
+
     while not rospy.is_shutdown():
         rate.sleep()
 
@@ -144,11 +172,11 @@ if __name__ == '__main__':
         # # wait for gripper to close
         # time.sleep(1)
 
-        if ret:
-            print("Open the gripper successfully!")
-        else:
-            print("Failed to open the gripper!")
-            continue
+        # if ret:
+        #     print("Open the gripper successfully!")
+        # else:
+        #     print("Failed to open the gripper!")
+        #     continue
 
         # Current pose of the end effector
         current_pose = arm._commander.get_current_pose().pose
@@ -168,7 +196,7 @@ if __name__ == '__main__':
         integral_tra = np.array([0, 0, 0])
 
         # pid for rotational velocity
-        kp_r = 0.14
+        kp_r = 0.3
         ki_r = 0.01
         kd_r = 0.001
 
@@ -192,11 +220,35 @@ if __name__ == '__main__':
         # integral = np.array([0, 0, 0, 0, 0, 0])
 
         # tolerance for translational error
-        tolerance = 0.007
+        tolerance = 0.004
 
         label_list = []
         error_list = []
         # abs(error[0]) < 3 and abs(error[1]) < 3 and abs(error[2]) < 3
+
+        # x, y, z with real depth
+        xyz_depth_1 = []
+        # x, y, z with size depth
+        xyz_size_1 = []
+        # Store error values
+        error_or_1 = []
+        error_pos_1 = []
+        # camera position change
+        camera_pos_1 = []
+        # record time
+        time_1 = []
+        # translational and rotational velocities
+        vel_tra_1 = []
+        vel_rot_1 = []
+        # translational and rotational error separate
+        error_tra_sep_1 = []
+        error_rot_sep_1 = []
+
+        # previous angle
+        previous_angle = [0, 0, 0]
+        previous_label = [0, 0, 0]
+
+        start_of_time = time.time()
         while(True):
             print("start")
             start = time.time()
@@ -219,10 +271,10 @@ if __name__ == '__main__':
             #     break
             # Moving maximum of the last 30 labels
             label_list.append(label_reverse)
-            if label_reverse == 0:
-                time.sleep(30)
-                continue
-            if len(label_list) > 10:
+            # if label_reverse == 0:
+            #     time.sleep(30)
+            #     continue
+            if len(label_list) > 4:
                 label_list.pop(0)
             else:
                 continue
@@ -255,7 +307,7 @@ if __name__ == '__main__':
             # print("target euler: ", target_euler)
 
             try:
-                depth = realsense.get_depth(realsense.depth, xc, yc, hw)
+                depth = realsense.get_depth(realsense.depth, realsense.image, xc, yc, hw)
             except Exception as e:
                 print(e)
                 exit(0)
@@ -265,9 +317,12 @@ if __name__ == '__main__':
             print("x, y, z before 3d position: ", xc, yc, depth)
             # Get the 3D position of the block
             x, y, z = get_3d_position(depth, xc, yc, realsense.camera_info)
+            xyz_depth_1.append([x, y, z])
             print("x, y, z after 3d position for depth: ", x, y, z)
             x, y, z = get_3d_position(ratio, xc, yc, realsense.camera_info)
             print("x, y, z after 3d position for ratio: ", x, y, z)
+            # append the values to the list
+            xyz_size_1.append([x, y, z])
 
             # Transform 3D position from camera frame to base frame
             # start = time.time()
@@ -277,6 +332,8 @@ if __name__ == '__main__':
 
             # find the camera location in the base frame
             current_position = get_camera_position('camera_color_frame', 'link_base', tf_buffer=tf_buffer)
+            camera_pos_1.append(current_position)
+            time_1.append(time.time() - start_of_time)
 
             target_position = [x, y, z]
             # print("Current position: ", current_position)
@@ -306,18 +363,22 @@ if __name__ == '__main__':
             print("Pose error after transforming: ", pos_error)
             print("Time taken by translation error: ", time.time() - start, "seconds")
 
-            if np.linalg.norm(pos_error[-1]) < 0.1:
-                pos_error[-1] = 0
+            # if np.linalg.norm(pos_error[-1]) < 0.1: 
+            #     pos_error[-1] = 0
 
-            if np.linalg.norm(pos_error) < tolerance:
-                print(np.linalg.norm(pos_error) < tolerance)
-                pos_error = [0, 0, 0]
-            print("Position error: ", pos_error)
+            # if np.linalg.norm(pos_error) < tolerance:
+            #     print(np.linalg.norm(pos_error) < tolerance)
+            #     pos_error = [0, 0, 0]
+            
             # convert the error to a numpy array
             pos_error = np.array(pos_error)
 
             # Convert the Euler angles to rotation matrices
             current_rotation = Rotation.from_euler('xyz', current_euler).as_matrix()
+            if previous_label == rotation_euler_angles:
+                target_euler = previous_angle
+            previous_label = rotation_euler_angles
+            previous_angle = target_euler
             target_rotation = Rotation.from_euler('xyz', target_euler).as_matrix()
 
             # Calculate the matrix difference between the target and current rotations
@@ -326,8 +387,28 @@ if __name__ == '__main__':
             # Convert the matrix difference back to Euler angles
             error = Rotation.from_matrix(rotation_difference).as_euler('xyz')
 
+
             if label_reverse == 0:
                 error = np.array([0, 0, 0])
+            
+            # Adjust the distance from the flower to 0.06
+            pos_error[-1] -= 0.06
+            
+            print("Position error: ", pos_error)
+            print("Total error: ", np.linalg.norm(pos_error) + np.linalg.norm(error))
+            # append seprate errors to the list
+            error_tra_sep_1.append(pos_error)
+            error_rot_sep_1.append(error)
+            # append the pos error and orientation error to the list
+            error_pos_1.append(np.linalg.norm(pos_error))
+            error_or_1.append(np.linalg.norm(error))
+            if np.linalg.norm(pos_error) + np.linalg.norm(error) < tolerance:
+                # time.sleep(20)
+                # append the real depth value to the list
+                depth_success.append([depth])
+
+                time_1_success.append([time.time() - start_of_time])
+                break
             # print("Orientation error: ", error)
             # PID for positional control
             # compute the integral of the error using the trapezoidal rule
@@ -364,10 +445,15 @@ if __name__ == '__main__':
 
             # # compute the PID control signal
             # control_signal = kp * error + ki * integral + kd * derivative
+
             
             # control velocity
             vel = control_signal_tra
             angular_velocity = control_signal_rot
+
+            # appnend to the list
+            vel_tra.append(vel)
+            vel_rot.append(angular_velocity)
 
             # print("Translational velocity: ", vel)
 
@@ -419,12 +505,82 @@ if __name__ == '__main__':
         twist_stamped.twist.angular.y = 0
         twist_stamped.twist.angular.z = 0
 
-        twist_pub.publish(twist_stamped)
+        # append all the values to the list
+        error_pos.append(error_pos_1)
+        error_or.append(error_or_1)
 
-        time.sleep(2)
+        xyz_depth.append(xyz_depth_1)
+        xyz_size.append(xyz_size_1)
+
+        camera_pos.append(camera_pos_1)
+        time_list.append(time_1)
+        vel_tra.append(vel_tra_1)
+        vel_rot.append(vel_rot_1)
+        error_tra_sep.append(error_tra_sep_1)
+        error_rot_sep.append(error_rot_sep_1)
+
+
+        # publish the twist
+        twist_pub.publish(twist_stamped)
+        time.sleep(3)
 
         cnts += 1
         
-        if cnts < 50:
+        if cnts < 0:
             continue
+        # save all the data to the csv file
+        with open('error_pos.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(error_pos)
+
+        with open('error_or.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(error_or)
+
+        with open('xyz_depth.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(xyz_depth)
+
+        with open('xyz_size.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(xyz_size)
+
+        with open('depth_success.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(depth_success)
         
+        with open('time_success.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(time_1_success)
+
+        with open('camera_position.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(camera_pos)
+        
+        with open('time.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(time_list)
+        
+        with open('vel_tra.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(vel_tra)
+
+        with open('vel_rot.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(vel_rot)
+
+        with open('error_tra_sep.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(error_tra_sep)
+
+        with open('error_rot_sep.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(error_rot_sep)
+
+
+        print("Done")
+        break
+
+    
+    # end the program
+    rospy.signal_shutdown("Done")

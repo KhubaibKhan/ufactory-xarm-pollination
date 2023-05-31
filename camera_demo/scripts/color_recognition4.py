@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import sys
-import os
+import yaml
 import time
-import cv2
-import rospy
 import rospy
 from tf2_geometry_msgs import *
 import cv2
@@ -22,6 +20,8 @@ from std_msgs.msg import Header
 import moveit_commander
 from scipy.spatial.transform import Rotation
 import tf
+import transforms3d as tf3d
+import csv
 
 warnings.filterwarnings("ignore")
 
@@ -37,47 +37,52 @@ labels = {0: '(0, 0)', 1: '(1, 0)', 2: '(-1, 0)', 3: '(-1, -1)', 4: '(0, 1)', 5:
 labels_reverse = {v:k for k,v in labels.items()}
 
 # Desired orientation in quaternions corresponding to the labels
-d_orientations = {0: [0, 0, 0], 1: [1.57, 0, 0], 2: [-1.57, 0, 0], 3: [-1.57, -0.78, 0], 4: [0, -1.57, 0], 5: [0, 1.57, 0], 6: [1.57, 0.78, 0], 7: [0.78, 1.57, 0], 8: [-0.78, -1.57, 0]}
+d_orientations = {0: [0, 0, 0], 1: [1.57, 0, 0], 2: [-1.57, 0, 0], 3: [-1.57, 0.78, 0], 4: [0, -1.57, 0], 5: [0, 1.57, 0], 6: [1.57, -0.78, 0], 7: [0.78, 1.57, 0], 8: [-0.78, -1.57, 0]}
 
-# Create the publisher
-twist_pub = rospy.Publisher('/servo_server/delta_twist_cmds', TwistStamped, queue_size=1) # Create publisher object
+# Image size
+image_size = (640, 480)
 
-# Get the desired end orientation
-def desired_orientation(orientation, arm):
-    current_pose = arm._commander.get_current_pose().pose
-    current_orientation = current_pose.orientation
 
-    # Rotate the end effector using orientation
-    q = tf.transformations.quaternion_multiply(
-        [current_orientation.x, current_orientation.y, current_orientation.z, current_orientation.w],
-        orientation)
-    new_orientation = geometry_msgs.msg.Quaternion()
-    new_orientation.x = q[0]
-    new_orientation.y = q[1]
-    new_orientation.z = q[2]
-    new_orientation.w = q[3]
+# get the calibration data from the yaml file
+def get_calibration_data(calibration_file):
+    '''
+    Get the calibration data from the yaml file
+    Yaml file has the following format:
+        qw: 0.7013088518485089
+        qx: 0.0039751934245023735
+        qy: -0.003477682492098677
+        qz: 0.7128379885223908
+        x: 0.0629845508606165
+        y: -0.03221690881661964
+        z: 0.019403200790438897
+    '''
 
-    orientation_tuple = (new_orientation.x, new_orientation.y, new_orientation.z, new_orientation.w)
-    return orientation_tuple
+    with open(calibration_file) as file:
+        # The FullLoader parameter handles the conversion from YAML
+        # scalar values to Python the dictionary format
+        calibration_data = yaml.load(file, Loader=yaml.FullLoader)
 
-# Compute the quaternion error
-def quaternion_error(q_current, q_desired):
+    # Get the camera matrix and distortion coefficients
+
+
+def position_error(current_position, target_position):
     """
-    Computes the quaternion error between two orientations.
-    :param q_current: current orientation quaternion (4D vector)
-    :param q_desired: desired orientation quaternion (4D vector)
-    :return: quaternion error as a 3D vector
+    Computes the position error between two positions.
+    :param current_position: current position (3D vector)
+    :param target_position: target position (3D vector)
+    :return: position error as a 3D vector
     """
-    # normalize the quaternions
-    q_current = q_current / np.linalg.norm(q_current)
-    q_desired = q_desired / np.linalg.norm(q_desired)
     
-    # compute the difference quaternion
-    q_error = np.quaternion(*q_current) * np.quaternion(*q_desired).conjugate()
-    
-    # convert the difference quaternion to a 3D vector
-    return np.array([q_error.x, q_error.y, q_error.z])
+    # If the target position x, y and z are in a certain range, then the error is 0
+    # if np.linalg.norm(np.array(target_position) - np.array(current_position)) < 0.3:
+    #     return np.array([0, 0, 0])
+    # else:
+    #     return np.array(target_position) - np.array(current_position)
 
+    # target_position[-2] = target_position[-2]*-1
+    error = np.array([target_position[0] - current_position[0], target_position[1] - current_position[1], target_position[2] - current_position[2]])
+    # error[1] = error[1] * -1
+    return error
 
 if __name__ == '__main__':
     rospy.init_node('color_recognition_node', anonymous=False)
@@ -97,9 +102,12 @@ if __name__ == '__main__':
     # Define the arm control and gripper control
     arm = XArmCtrl(6)
     gripper = GripperCtrl()
+    current_pose = arm._commander.get_current_pose().pose
+    print("Current pose of the robot: ", current_pose)
 
     # Define an initial pose
     starting_joints = [-0.00025873768026940525, -0.31601497530937195, -1.3658411502838135, 0.00034579072962515056, 1.6826152801513672, -0.0012134681455790997]
+    initial_position = [0.12740904092788696, -0.5061454772949219, -0.16231562197208405, 0.06283185631036758, -0.8237953782081604, 0.003490658476948738]
     # initial_pose = [0.370, 0.00, 0.400, 0.707, 0, 0, 0.707]
 
 
@@ -108,13 +116,23 @@ if __name__ == '__main__':
     color = (0, 0, 255)
     realsense = Realsense()
     cnts = 0
+
+    # Store depth values for every successfull loop
+    depth_success = []
+    # x, y, z with real depth
+    xyz_depth = []
+    # x, y, z with size depth
+    xyz_size = []
+    # Store error values
+    error_or = []
+    error_pos = []
     while not rospy.is_shutdown():
         rate.sleep()
 
-        # frame = realsense.image
-        # if frame is None:
-        #     print("No frame")
-        #     continue
+        frame = realsense.image
+        if frame is None:
+            print("No frame")
+            continue
 
         # Go to the initial pose
         ret = arm.set_joints(starting_joints, wait=True)
@@ -124,273 +142,286 @@ if __name__ == '__main__':
         else:
             print("Failed to go to the initial pose!")
             continue
-        # Open the gripper
-        ret = gripper.open()
+        # # Open the gripper
+        # ret = gripper.open()
+
+        # # wait for input key to start
+        # input("Press Enter to start the program...") 
+        # # close the gripper
+        # ret = gripper.close()
+        # # wait for gripper to close
+        # time.sleep(1)
+
         if ret:
             print("Open the gripper successfully!")
         else:
             print("Failed to open the gripper!")
             continue
 
-        # # Current pose of the end effector
-        # current_pose = arm._commander.get_current_pose().pose
-        # print("Current pose of the robot: ", current
-        # _pose)
+        # Current pose of the end effector
+        current_pose = arm._commander.get_current_pose().pose
+        print("Current pose of the robot: ", current_pose)
 
-        # # Get current joint values
-        # current_joints = arm._commander.get_current_joint_values()
-        # print("Current joint values: ", current_joints)
+        # Get current joint values
+        current_joints = arm._commander.get_current_joint_values()
+        print("Current joint values: ", current_joints)
 
-        # centroids = detect_color_block(realsense.image, color)
-        # if len(centroids) == 0:
-        #     continue
-        # print(centroids)
-        # xc, yc, label = centroids[0]
-        # # label_ind = labels.keys()[labels.values().index(label)]
-        # print("Centroid: ", xc, yc, label)
-        # key = [key for key, value in labels.items() if value == label]
-        # print("Index: ", key)
+        # pid for translational velocity
+        kp_t = 0.3
+        ki_t = 0.01
+        kd_t = 0.001
 
-        # # Convert ROS image to OpenCV image
-        # cv_image = cv_bridge.imgmsg_to_cv2(realsense.image, 'bgr8')
+        error_tra = np.array([0, 0, 0])
+        prev_error_tra = np.array([0, 0, 0])
+        integral_tra = np.array([0, 0, 0])
 
-        # # Get depth
-        # depth = realsense.get_depth(realsense.depth, xc, yc)
-        # # Get the 3D position of the block
-        # x, y, z = get_3d_position(depth, xc, yc, realsense.camera_info)
+        # pid for rotational velocity
+        kp_r = 0.14
+        ki_r = 0.01
+        kd_r = 0.001
 
-        # # Transform 3D position from camera frame to base frame
-        # x, y, z = transform_3d_position(x, y, z, 'camera_color_optical_frame', 'link_base', tf_buffer=tf_buffer)
+        error_rot = np.array([0, 0, 0])
+        prev_error_rot = np.array([0, 0, 0])
+        integral_rot = np.array([0, 0, 0])
 
-        # # Target pose of the end effector in pose stamped
-        # target_pose = PoseStamped()
-        # target_pose.header.frame_id = 'link_base'
-        # target_pose.pose.position.x = x
-        # target_pose.pose.position.y = y
-        # target_pose.pose.position.z = z
-        # target_pose.pose.orientation.x = 1
-        # target_pose.pose.orientation.y = 0
-        # target_pose.pose.orientation.z = 0
-        # target_pose.pose.orientation.w = 1
+        # # Whole pid control
+        # kp = 0.1 # proportional
+        # ki = 0.01 # integral
+        # kd = 0.001 # derivative
 
-        # Change the orientation of the end-effector by 90 degrees
-        # target_orientation = tf.transformations.quaternion_from_euler(-1.57, 0, 0)
-        # target_orientation = [target_orientation.x, target_orientation.y, target_orientation.z, target_orientation.w]
-        # target_orientation = [-1.57, 0, 0]
-        # orientation = [0.707, 0, 0, 0.707]
-        # print("Orientation: ", target_orientation)
+        # time step
+        dt = 0.01
+        # time step for translational
+        dt_tr = 0.001
 
-        # # Get the desired orientation
-        # d_orient = desired_orientation(orientation, arm=arm)
-        # # convert this to quaternion
-        # d_orient = geometry_msgs.msg.Quaternion(*d_orient)
-        # print("Desired orientation: ", d_orient)
-        
-        # current_pose = arm._commander.get_current_pose().pose
-        # current_orientation = current_pose.orientation
-        # q = tf.transformations.quaternion_multiply(
-        # [current_orientation.x, current_orientation.y, current_orientation.z, current_orientation.w],
-        # orientation)
+        # # initialize the error and integral
+        # error = np.array([0, 0, 0, 0, 0, 0])
+        # prev_error = np.array([0, 0, 0, 0, 0, 0])
+        # integral = np.array([0, 0, 0, 0, 0, 0])
 
-        # for i in range(10):
-        #     ret = arm.change_orientation(orientation, wait=True)
-        #     if ret:
-        #         print("Change orientation successfully!")
-        #     else:
-        #         print("Failed to change orientation!")
+        # tolerance for translational error
+        tolerance = 0.001
 
-        kp = 0.2
-        error = [-1, -1, -1]
-        last_error = [0, 0, 0]
         label_list = []
-
-        x_command = 0.1
-        y_command = 0.1
-        i = 0
+        error_list = []
         # abs(error[0]) < 3 and abs(error[1]) < 3 and abs(error[2]) < 3
+
+        # x, y, z with real depth
+        xyz_depth_1 = []
+        # x, y, z with size depth
+        xyz_size_1 = []
+        # Store error values
+        error_or_1 = []
+        error_pos_1 = []
         while(True):
-            i += 1
+            print("start")
+            start = time.time()
+            centroids = detect_color_block(realsense.image, color)
+            # Time taken by deep learning model in seconds
+            print("Time taken by deep learning model: ", time.time() - start, "seconds")
+            if len(centroids) == 0:
+                continue
+            print(centroids)
+            xc, yc, label, hw = centroids[0]
+            label_reverse = labels_reverse[label]
 
-            # centroids = detect_color_block(realsense.image, color)
-            # if len(centroids) == 0:
-            #     continue
-            # print(centroids)
-            # xc, yc, label = centroids[0]
-            # label_reverse = labels_reverse[label]
+            # get the ratio between the size of the object and the image
+            ratio = find_ratio(image_size, hw)
+            ratio /= 3
 
-            # # label_ind = labels.keys()[labels.values().index(label)]
+            # label_ind = labels.keys()[labels.values().index(label)]
             # print("Centroid: ", xc, yc, label)
-            # # if label == 0:
-            # #     break
-            # # Moving maximum of the last 30 labels
-            # label_list.append(label_reverse)
-            # if len(label_list) > 30:
-            #     label_list.pop(0)
-            # else:
+            # if label == 0:
+            #     break
+            # Moving maximum of the last 30 labels
+            label_list.append(label_reverse)
+            # if label_reverse == 0:
+            #     time.sleep(30)
             #     continue
-            # label_reverse = max(set(label_list), key=label_list.count)
+            if len(label_list) > 4:
+                label_list.pop(0)
+            else:
+                continue
+
+            label_reverse = max(set(label_list), key=label_list.count)
 
             # if label_reverse == 0:
             #     break
-            # print("Label: ", label_reverse)
 
-            # # Get the current pose of the end effector
-            # current_pose = arm._commander.get_current_pose().pose
+            # Get the current pose of the end effector
+            current_pose = arm._commander.get_current_pose().pose
             # current_pose = [current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w]
+            # Convert quaternion to euler angles
+            current_euler = tf.transformations.euler_from_quaternion([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
 
-            # print("Current pose: ", current_pose)
             # target_orientation = tf.transformations.quaternion_from_euler(*d_orientations[label_reverse])
-            # print("Target orientation: ", target_orientation)
-            # # Convert quaternion to euler angles
-            # current_euler = tf.transformations.euler_from_quaternion([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
+            rotation_euler_angles = d_orientations[label_reverse]
+
+            # Create rotation objects from the Euler angles
+            initial_rotation = Rotation.from_euler('xyz', current_euler)
+            rotation_to_apply = Rotation.from_euler('xyz', rotation_euler_angles)
+
+            # Calculate the resulting rotation by multiplying the two rotation matrices
+            resulting_rotation = rotation_to_apply.as_matrix().dot(initial_rotation.as_matrix())
+            
+            # Convert the resulting rotation back to Euler angles
+            target_euler = Rotation.from_matrix(resulting_rotation).as_euler('xyz')
+
             # print("Current euler: ", current_euler)
-            # print("target euler: ", target_orientation)
-            # Calculate quaternion difference
-            # quat_diff = Rotation.from_quat(current_pose) * Rotation.from_quat(target_orientation).inv()
+            # print("target euler: ", target_euler)
 
-            # # Convert quaternion difference to Euler angles
-            # error = quat_diff.as_euler('xyz')
-            # last_error = error
+            try:
+                depth = realsense.get_depth(realsense.depth, xc, yc, hw)
+            except Exception as e:
+                print(e)
+                exit(0)
 
-            print("Error: ", error)
+            print("Ratio of the object and depth of the object: ", ratio, depth)
 
-            # find the error between current orientation and desired orientation
-            # error = [target_orientation[0] - current_euler[0], target_orientation[1] - current_euler[1], target_orientation[2] - current_euler[2]]
-            # error = [current_euler[0] - target_orientation[0], current_euler[1] - target_orientation[1], current_euler[2] - target_orientation[2]]
-            # Convert the error to angular velocity
-            angular_velocity = [error[0] * kp, error[1] * kp, error[2] * kp]
-            print("Angular velocity: ", angular_velocity)
-            if i<1000:
-                print("i")
-                # Publish the angular velocity to /servo_server/delta_twist_cmds topic
-                twist_stamped = TwistStamped() # Create TwistStamped message object
-                twist_stamped.header.stamp = rospy.Time.now()
-                twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
+            print("x, y, z before 3d position: ", xc, yc, depth)
+            # Get the 3D position of the block
+            x, y, z = get_3d_position(depth, xc, yc, realsense.camera_info)
+            xyz_depth_1.append([x, y, z])
+            print("x, y, z after 3d position for depth: ", x, y, z)
+            x, y, z = get_3d_position(ratio, xc, yc, realsense.camera_info)
+            print("x, y, z after 3d position for ratio: ", x, y, z)
 
-                twist_stamped.twist.linear.x = -x_command
-                twist_stamped.twist.linear.y = 0
-                twist_stamped.twist.linear.z = 0
-                twist_stamped.twist.angular.x = 0
-                twist_stamped.twist.angular.y = 0
-                twist_stamped.twist.angular.z = 0
+            # append the values to the list
+            xyz_size_1.append([x, y, z])
 
-                twist_pub.publish(twist_stamped)
+            # Transform 3D position from camera frame to base frame
+            # start = time.time()
+            x, y, z = transform_3d_position(x, y, z, 'camera_color_frame', 'link_base', tf_buffer=tf_buffer)
+
+            # print("time taken: ", time.time() - start)
+
+            # find the camera location in the base frame
+            current_position = get_camera_position('camera_color_frame', 'link_base', tf_buffer=tf_buffer)
+
+            target_position = [x, y, z]
+            # print("Current position: ", current_position)
+            # print("Target position: ", target_position)
+
+            # # Find the error between current position and desired position
+            pos_error = position_error(current_position, target_position)
+
+            # if np.linalg.norm(pos_error[-1]) < 0.1:
+            #     pos_error[-1] = 0
+
+            # if np.linalg.norm(pos_error) < tolerance:
+            #     print(np.linalg.norm(pos_error) < tolerance)
+            #     pos_error = [0, 0, 0]
             
-            if i > 1000 and i < 2000:
-                print("ii")
-                                # Publish the angular velocity to /servo_server/delta_twist_cmds topic
-                twist_stamped = TwistStamped() # Create TwistStamped message object
-                twist_stamped.header.stamp = rospy.Time.now()
-                twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
+            # convert the error to a numpy array
+            pos_error = np.array(pos_error)
 
-                twist_stamped.twist.linear.x = 0
-                twist_stamped.twist.linear.y = x_command
-                twist_stamped.twist.linear.z = 0
-                twist_stamped.twist.angular.x = 0
-                twist_stamped.twist.angular.y = 0
-                twist_stamped.twist.angular.z = 0
+            # Convert the Euler angles to rotation matrices
+            current_rotation = Rotation.from_euler('xyz', current_euler).as_matrix()
+            target_rotation = Rotation.from_euler('xyz', target_euler).as_matrix()
 
-                twist_pub.publish(twist_stamped)
+            # Calculate the matrix difference between the target and current rotations
+            rotation_difference = target_rotation.dot(current_rotation.T)
+
+            # Convert the matrix difference back to Euler angles
+            error = Rotation.from_matrix(rotation_difference).as_euler('xyz')
+
+            if label_reverse == 0:
+                error = np.array([0, 0, 0])
             
-            else:
-                print("iii")
-                                # Publish the angular velocity to /servo_server/delta_twist_cmds topic
-                twist_stamped = TwistStamped() # Create TwistStamped message object
-                twist_stamped.header.stamp = rospy.Time.now()
-                twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
+            # Adjust the distance from the flower to 0.06
+            pos_error[-1] -= 0.06
+            
+            print("Position error: ", pos_error)
+            print("Total error: ", np.linalg.norm(pos_error) + np.linalg.norm(error))
+            # append the pos error and orientation error to the list
+            error_pos_1.append(np.linalg.norm(pos_error))
+            error_or_1.append(np.linalg.norm(error))
+            if np.linalg.norm(pos_error) + np.linalg.norm(error) < tolerance:
+                # time.sleep(20)
+                # append the real depth value to the list
+                depth_success.append([depth])
+                break
+            # print("Orientation error: ", error)
+            # PID for positional control
+            # compute the integral of the error using the trapezoidal rule
+            integral_tra = integral_tra + 0.5 * (pos_error + prev_error_tra) * dt_tr
 
-                twist_stamped.twist.linear.x = 0
-                twist_stamped.twist.linear.y = 0
-                twist_stamped.twist.linear.z = x_command
-                twist_stamped.twist.angular.x = 0
-                twist_stamped.twist.angular.y = 0
-                twist_stamped.twist.angular.z = 0
+            # compute the derivative of the error using the backward difference method
+            derivative = (pos_error - prev_error_tra) / dt_tr
 
-                twist_pub.publish(twist_stamped)
-            rate.sleep()
+            # compute the PID control signal
+            control_signal_tra = kp_t * pos_error + ki_t * integral_tra + kd_t * derivative
 
-            # # Get the current pose of the end effector
-            # current_pose = arm._commander.get_current_pose().pose
-            # # convert the quaternion to euler angles
-            # current_euler = tf.transformations.euler_from_quaternion([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
-            # # compute the error between current and desired euler angles
-            # error = [target_orientation[i] - current_euler[i] for i in range(3)]
+            # PID for orientation control
+            # compute the integral of the error using the trapezoidal rule
+            integral_rot = integral_rot + 0.5 * (error + prev_error_rot) * dt
 
-            # # compute error integral and derivative
-            # error_sum += error
-            # error_diff = error - last_error
-            # last_error = error
+            # compute the derivative of the error using the backward difference method
+            derivative = (error - prev_error_rot) / dt
 
-            # # compute the control signal using PID formula
-            # p_signal = [Kp * error[i] for i in range(3)]
-            # i_signal = [Ki * error_sum[i] for i in range(3)]
-            # d_signal = [Kd * error_diff[i] for i in range(3)]
+            # compute the PID control signal
+            control_signal_rot = kp_r * error + ki_r * integral_rot + kd_r * derivative
 
-            # control_signals = [p_signal[i] + i_signal[i] + d_signal[i] for i in range(3)]
 
-            # # Publish the angular velocity to /servo_server/delta_twist_cmds topic
-            # twist_stamped = TwistStamped() # Create TwistStamped message object
-            # twist_stamped.header.stamp = rospy.Time.now()
-            # twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
+            # # combine pos error and orientation error in a list
+            # error = [pos_error[0], pos_error[1], pos_error[2], error[0], error[1], error[2]]
 
-            # twist_stamped.twist.linear.x = 0
-            # twist_stamped.twist.linear.y = 0
-            # twist_stamped.twist.linear.z = 0
-            # twist_stamped.twist.angular.x = control_signals[0]
-            # twist_stamped.twist.angular.y = control_signals[1]
-            # twist_stamped.twist.angular.z = control_signals[2]
+            # # convert error into numpy array
+            # error = np.array(error)
 
-            # twist_pub.publish(twist_stamped)
-            # rate.sleep()
+            # # compute the integral of the error using the trapezoidal rule
+            # integral = integral + 0.5 * (error + prev_error) * dt
+
+            # # compute the derivative of the error using the backward difference method
+            # derivative = (error - prev_error) / dt
+
+            # # compute the PID control signal
+            # control_signal = kp * error + ki * integral + kd * derivative
+
+            
+            # control velocity
+            vel = control_signal_tra
+            angular_velocity = control_signal_rot
+            angular_velocity = [0, 0, 0]
+
+            # using the translational velocity and angular velocity to control the robot
+            current_rotation = np.array(current_rotation) + np.array(angular_velocity)
+            current_rotation = Rotation.from_matrix(current_rotation).as_quat()
+            arm.moveto(x=vel[0], y=vel[1], z=vel[2], ox=current_rotation[0], oy=current_rotation[1], oz=current_rotation[2], ow=current_rotation[3], relative=True, wait=False)
+
             
             
-        
-        # Publish the angular velocity to /servo_server/delta_twist_cmds topic
-        twist_stamped = TwistStamped() # Create TwistStamped message object
-        twist_stamped.header.stamp = rospy.Time.now()
-        twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
 
-        twist_stamped.twist.linear.x = 0
-        twist_stamped.twist.linear.y = 0
-        twist_stamped.twist.linear.z = 0
-        twist_stamped.twist.angular.x = 0
-        twist_stamped.twist.angular.y = 0
-        twist_stamped.twist.angular.z = 0
+        # append all the values to the list
+        error_pos.append(error_pos_1)
+        error_or.append(error_or_1)
 
-        twist_pub.publish(twist_stamped)
+        xyz_depth.append(xyz_depth_1)
+        xyz_size.append(xyz_size_1)
 
-        # # Convert quaternion to euler angles
-        # current_euler = tf.transformations.euler_from_quaternion([current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z, current_pose.orientation.w])
+        time.sleep(20)
 
-        # # find the error between current orientation and desired orientation
-        # error = [target_orientation[0] - current_euler[0], target_orientation[1] - current_euler[1], target_orientation[2] - current_euler[2]]
-        
-        # # Convert the error to angular velocity
-        # kp = 0.5
-        # angular_velocity = [error[0] * kp, error[1] * kp, error[2] * kp]
-
-        # # Publish the angular velocity to /servo_server/delta_twist_cmds topic
-        # twist = Twist()
-        # twist.linear.x = 0
-        # twist.linear.y = 0
-        # twist.linear.z = 0
-        # twist.angular.x = angular_velocity[0]
-        # twist.angular.y = angular_velocity[1]
-        # twist.angular.z = angular_velocity[2]
-
-        # twist_pub.publish(twist)
-
-        # Move the end effector using moveit
-        # arm.move_velocity(desired_velocity[0], desired_velocity[1], desired_velocity[2], desired_velocity[3], desired_velocity[4], desired_velocity[5], wait=False)
-        
-        # sleep for 10 second
-        time.sleep(10)
-
-        # Move the end effector using moveit
-        # arm.move_velocity(desired_velocity[0], desired_velocity[1], desired_velocity[2], desired_velocity[3], desired_velocity[4], desired_velocity[5], wait=False)
-        
         cnts += 1
         
         if cnts < 50:
             continue
-        
+        # save all the data to the csv file
+        with open('error_pos.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(error_pos)
+
+        with open('error_or.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(error_or)
+
+        with open('xyz_depth.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(xyz_depth)
+
+        with open('xyz_size.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(xyz_size)
+
+        with open('depth_success.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(depth_success)
