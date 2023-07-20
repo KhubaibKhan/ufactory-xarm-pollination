@@ -107,13 +107,16 @@ class XArmCtrl(object):
             return True
         try:
             pose_target = self._commander.get_current_pose().pose
+            print(pose_target)
             if relative:
-                pose_target.position.x += x / 1000.0 if x is not None else 0
-                pose_target.position.y += y / 1000.0 if y is not None else 0
-                pose_target.position.z += z / 1000.0 if z is not None else 0
-                pose_target.orientation.x += ox if ox is not None else 0
-                pose_target.orientation.y += oy if oy is not None else 0
-                pose_target.orientation.z += oz if oz is not None else 0
+                pose_target.position.x += x if x is not None else 0
+                pose_target.position.y += y if y is not None else 0
+                pose_target.position.z += z if z is not None else 0
+                pose_target.orientation.x = ox if ox is not None else 0
+                pose_target.orientation.y = oy if oy is not None else 0
+                pose_target.orientation.z = oz if oz is not None else 0
+                pose_target.orientation.w = ow if oz is not None else 0
+                print(pose_target)
             else:
                 pose_target.position.x = x if x is not None else pose_target.position.x
                 pose_target.position.y = y if y is not None else pose_target.position.y

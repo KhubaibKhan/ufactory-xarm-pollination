@@ -34,12 +34,85 @@ class Realsense:
         self.depth = None
 
     # Function that gets depth from depth image
-    def get_depth(self, depth, xc, yc, hw):
+    def get_depth(self, depth, image, xc, yc, hw):
         # Convert ROS image to OpenCV image
         cv_depth = cv_bridge.imgmsg_to_cv2(depth, 'passthrough')
+        
+        # Convert ROS image to OpenCV image
+        cv_image = cv_bridge.imgmsg_to_cv2(image, 'bgr8')
 
-        # Get the average depth of the block
-        depth = np.mean(cv_depth[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)])
+        # Get the average depth of all the yellow pixels in the block
+        box_region_depth = cv_depth[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)]
+        box_region_color = cv_image[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)]
+
+        # Detect the yellow pixels in the box region
+        lower_yellow = np.array([20, 100, 100])
+        upper_yellow = np.array([30, 255, 255])
+        yellow_mask = cv2.inRange(box_region_color, lower_yellow, upper_yellow)
+        yellow_pixels = np.where(yellow_mask == 255)
+
+        # Get the average depth of the yellow pixels
+        depth = np.mean(box_region_depth[yellow_pixels[0], yellow_pixels[1]])
+
+
+        # Return depth
+        return depth
+    
+    # Function that gets image from image topic
+    def image_callback(self, image):
+        self.image = image
+
+    # Function that gets depth from depth topic
+    def depth_callback(self, depth):
+        self.depth = depth
+
+    # Function that gets camera info from camera info topic
+    def camera_info_callback(self, camera_info):
+        self.camera_info = camera_info
+
+
+# Realsense class to get aligned image and depth image
+class AzureKinect:
+    def __init__(self):
+        # Subscribe to aligned image topic
+        self.image_sub = rospy.Subscriber('/rgb/image_rect_color', Image, self.image_callback)
+
+        # Subscribe to aligned depth image topic
+        self.depth_sub = rospy.Subscriber('/depth/image_rect_raw', Image, self.depth_callback)
+
+        # Subscribe to camera info topic
+        self.camera_info_sub = rospy.Subscriber('/rgb/camera_info', CameraInfo, self.camera_info_callback)
+
+        # camera info
+        self.camera_info = None
+
+        # Initialize cv_bridge
+        self.cv_bridge = CvBridge()
+
+        # Global image
+        self.image = None
+        self.depth = None
+
+    # Function that gets depth from depth image
+    def get_depth(self, depth, image, xc, yc, hw):
+        # Convert ROS image to OpenCV image
+        cv_depth = cv_bridge.imgmsg_to_cv2(depth, 'passthrough')
+        
+        # Convert ROS image to OpenCV image
+        cv_image = cv_bridge.imgmsg_to_cv2(image, 'bgr8')
+
+        # Get the average depth of all the yellow pixels in the block
+        box_region_depth = cv_depth[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)]
+        box_region_color = cv_image[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)]
+
+        # Detect the yellow pixels in the box region
+        lower_yellow = np.array([20, 100, 100])
+        upper_yellow = np.array([30, 255, 255])
+        yellow_mask = cv2.inRange(box_region_color, lower_yellow, upper_yellow)
+        yellow_pixels = np.where(yellow_mask == 255)
+
+        # Get the average depth of the yellow pixels
+        depth = np.mean(box_region_depth[yellow_pixels[0], yellow_pixels[1]])
 
 
         # Return depth
@@ -62,13 +135,14 @@ def detect_color_block(image, color):
     # Convert ROS image to OpenCV image
     cv_image = cv_bridge.imgmsg_to_cv2(image, 'bgr8')
     original_size = cv_image.shape
+    print(original_size)
 
     # resize the image
     cv_image = cv2.resize(cv_image, (640, 480))
     # cv_image = cv2.flip(cv_image, 0)
     # flip the image to match the camera
 
-    xyxy = run(weights="/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/yolov5/runs/train/exp7/weights/best.pt", image=cv_image)
+    xyxy = run(weights="/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/yolov5/best.pt", image=cv_image, imgsz=(640, 480))
     
     # Draw the xyxy box on the image
     for box in xyxy:

@@ -10,6 +10,7 @@ import numpy as np
 from tuts.gripper_ctrl import GripperCtrl
 from tuts.xarm_ctrl import XArmCtrl
 from utilsm.utils import *
+from utilsm.utils import Realsense
 from utilsm.motion_thread import MotionThread
 import warnings
 from numpy.linalg import norm
@@ -44,28 +45,6 @@ twist_pub = rospy.Publisher('/servo_server/delta_twist_cmds', TwistStamped, queu
 
 # Image size
 image_size = (640, 480)
-
-
-# get the calibration data from the yaml file
-def get_calibration_data(calibration_file):
-    '''
-    Get the calibration data from the yaml file
-    Yaml file has the following format:
-        qw: 0.7013088518485089
-        qx: 0.0039751934245023735
-        qy: -0.003477682492098677
-        qz: 0.7128379885223908
-        x: 0.0629845508606165
-        y: -0.03221690881661964
-        z: 0.019403200790438897
-    '''
-
-    with open(calibration_file) as file:
-        # The FullLoader parameter handles the conversion from YAML
-        # scalar values to Python the dictionary format
-        calibration_data = yaml.load(file, Loader=yaml.FullLoader)
-
-    # Get the camera matrix and distortion coefficients
 
 
 def position_error(current_position, target_position):
@@ -149,26 +128,29 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
         rate.sleep()
 
-        frame = realsense.image
-        if frame is None:
-            print("No frame")
-            continue
+        # frame = realsense.image
+        # if frame is None:
+        #     print("No frame")
+        #     continue
 
-        # Go to the initial pose
-        ret = arm.set_joints(starting_joints, wait=True)
-        # ret = arm.moveto(x=initial_pose[0], y=initial_pose[1], z=initial_pose[2], ox=initial_pose[3], oy=initial_pose[4], oz=initial_pose[5], ow=initial_pose[6], wait=True, relative=False)
-        if ret:
-            print("Go to the initial pose successfully!")
-        else:
-            print("Failed to go to the initial pose!")
-            continue
+        # # Go to the initial pose
+        # ret = arm.set_joints(starting_joints, wait=True)
+        # # ret = arm.moveto(x=initial_pose[0], y=initial_pose[1], z=initial_pose[2], ox=initial_pose[3], oy=initial_pose[4], oz=initial_pose[5], ow=initial_pose[6], wait=True, relative=False)
+        # if ret:
+        #     print("Go to the initial pose successfully!")
+        # else:
+        #     print("Failed to go to the initial pose!")
+        #     continue
         # # Open the gripper
         # ret = gripper.open()
 
-        # # wait for input key to start
-        # input("Press Enter to start the program...") 
+        # wait for input key to start
+        input("Press Enter to start the program...") 
         # # close the gripper
         # ret = gripper.close()
+        # # wait for gripper to close
+        # input("press to open it")
+        # ret = gripper.open()
         # # wait for gripper to close
         # time.sleep(1)
 
@@ -177,6 +159,8 @@ if __name__ == '__main__':
         # else:
         #     print("Failed to open the gripper!")
         #     continue
+
+        # continue
 
         # Current pose of the end effector
         current_pose = arm._commander.get_current_pose().pose
@@ -187,7 +171,7 @@ if __name__ == '__main__':
         print("Current joint values: ", current_joints)
 
         # pid for translational velocity
-        kp_t = 0.3
+        kp_t = 0.5
         ki_t = 0.01
         kd_t = 0.001
 
@@ -196,7 +180,7 @@ if __name__ == '__main__':
         integral_tra = np.array([0, 0, 0])
 
         # pid for rotational velocity
-        kp_r = 0.3
+        kp_r = 0.2
         ki_r = 0.01
         kd_r = 0.001
 
@@ -204,20 +188,10 @@ if __name__ == '__main__':
         prev_error_rot = np.array([0, 0, 0])
         integral_rot = np.array([0, 0, 0])
 
-        # # Whole pid control
-        # kp = 0.1 # proportional
-        # ki = 0.01 # integral
-        # kd = 0.001 # derivative
-
         # time step
         dt = 0.01
         # time step for translational
         dt_tr = 0.001
-
-        # # initialize the error and integral
-        # error = np.array([0, 0, 0, 0, 0, 0])
-        # prev_error = np.array([0, 0, 0, 0, 0, 0])
-        # integral = np.array([0, 0, 0, 0, 0, 0])
 
         # tolerance for translational error
         tolerance = 0.004
@@ -253,11 +227,13 @@ if __name__ == '__main__':
             print("start")
             start = time.time()
             centroids = detect_color_block(realsense.image, color)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
             # Time taken by deep learning model in seconds
             print("Time taken by deep learning model: ", time.time() - start, "seconds")
             if len(centroids) == 0:
                 continue
-            print(centroids)
+            # continue
             xc, yc, label, hw = centroids[0]
             label_reverse = labels_reverse[label]
 
@@ -303,9 +279,6 @@ if __name__ == '__main__':
             # Convert the resulting rotation back to Euler angles
             target_euler = Rotation.from_matrix(resulting_rotation).as_euler('xyz')
 
-            # print("Current euler: ", current_euler)
-            # print("target euler: ", target_euler)
-
             try:
                 depth = realsense.get_depth(realsense.depth, realsense.image, xc, yc, hw)
             except Exception as e:
@@ -336,15 +309,11 @@ if __name__ == '__main__':
             time_1.append(time.time() - start_of_time)
 
             target_position = [x, y, z]
-            # print("Current position: ", current_position)
-            # print("Target position: ", target_position)
 
             # # Find the error between current position and desired position
             pos_error = position_error(current_position, target_position)
             start = time.time()
-            # pos_error = np.array(target_position) - np.array(current_position)
-            # print("Pose error before transforming: ", pos_error)
-            # Transform the error from base frame to end effector frame
+
             # get the transform from base to link_eef
             eef_R = get_transform('link_eef', 'link_base', tf_buffer=tf_buffer)
             eef_R = np.array([eef_R.transform.rotation.x, eef_R.transform.rotation.y, eef_R.transform.rotation.z, eef_R.transform.rotation.w])

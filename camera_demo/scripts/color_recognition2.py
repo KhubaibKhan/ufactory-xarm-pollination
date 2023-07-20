@@ -155,7 +155,7 @@ if __name__ == '__main__':
             continue
 
         # Go to the initial pose
-        ret = arm.set_joints(initial_position2, wait=True)
+        ret = arm.set_joints(starting_joints, wait=True)
         # ret = arm.moveto(x=initial_pose[0], y=initial_pose[1], z=initial_pose[2], ox=initial_pose[3], oy=initial_pose[4], oz=initial_pose[5], ow=initial_pose[6], wait=True, relative=False)
         if ret:
             print("Go to the initial pose successfully!")
@@ -196,7 +196,7 @@ if __name__ == '__main__':
         integral_tra = np.array([0, 0, 0])
 
         # pid for rotational velocity
-        kp_r = 0.14
+        kp_r = 0.3
         ki_r = 0.01
         kd_r = 0.001
 
@@ -204,20 +204,10 @@ if __name__ == '__main__':
         prev_error_rot = np.array([0, 0, 0])
         integral_rot = np.array([0, 0, 0])
 
-        # # Whole pid control
-        # kp = 0.1 # proportional
-        # ki = 0.01 # integral
-        # kd = 0.001 # derivative
-
         # time step
         dt = 0.01
         # time step for translational
         dt_tr = 0.001
-
-        # # initialize the error and integral
-        # error = np.array([0, 0, 0, 0, 0, 0])
-        # prev_error = np.array([0, 0, 0, 0, 0, 0])
-        # integral = np.array([0, 0, 0, 0, 0, 0])
 
         # tolerance for translational error
         tolerance = 0.002
@@ -378,9 +368,9 @@ if __name__ == '__main__':
             twist_stamped.header.stamp = rospy.Time.now()
             twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
 
-            twist_stamped.twist.linear.x = vel[0]
-            twist_stamped.twist.linear.y = vel[1]
-            twist_stamped.twist.linear.z = vel[2]
+            twist_stamped.twist.linear.x = 0.07
+            twist_stamped.twist.linear.y = 0
+            twist_stamped.twist.linear.z = 0
             twist_stamped.twist.angular.x = 0
             twist_stamped.twist.angular.y = 0
             twist_stamped.twist.angular.z = 0
@@ -389,25 +379,27 @@ if __name__ == '__main__':
             # twist_stamped.twist.angular.z = angular_velocity[2]
 
             twist_pub.publish(twist_stamped)
+            break
 
 
-            twist_stamped = TwistStamped() # Create TwistStamped message object
-            twist_stamped.header.stamp = rospy.Time.now()
-            twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
+            # twist_stamped = TwistStamped() # Create TwistStamped message object
+            # twist_stamped.header.stamp = rospy.Time.now()
+            # twist_stamped.header.frame_id = "link_eef"  # set to the desired frame ID
 
-            twist_stamped.twist.linear.x = vel[0]
-            twist_stamped.twist.linear.y = vel[1]
-            twist_stamped.twist.linear.z = vel[2]
-            # twist_stamped.twist.angular.x = 0
-            # twist_stamped.twist.angular.y = 0
-            # twist_stamped.twist.angular.z = 0
-            twist_stamped.twist.angular.x = angular_velocity[0]
-            twist_stamped.twist.angular.y = angular_velocity[1]
-            twist_stamped.twist.angular.z = angular_velocity[2]
+            # twist_stamped.twist.linear.x = vel[0]
+            # twist_stamped.twist.linear.y = vel[1]
+            # twist_stamped.twist.linear.z = vel[2]
+            # # twist_stamped.twist.angular.x = 0
+            # # twist_stamped.twist.angular.y = 0
+            # # twist_stamped.twist.angular.z = 0
+            # twist_stamped.twist.angular.x = angular_velocity[0]
+            # twist_stamped.twist.angular.y = angular_velocity[1]
+            # twist_stamped.twist.angular.z = angular_velocity[2]
 
-            twist_pub.publish(twist_stamped)
+            # twist_pub.publish(twist_stamped)
             
-            
+        time.sleep(5)
+        exit(0)
         
         # Publish the angular velocity to /servo_server/delta_twist_cmds topic
         twist_stamped = TwistStamped() # Create TwistStamped message object
