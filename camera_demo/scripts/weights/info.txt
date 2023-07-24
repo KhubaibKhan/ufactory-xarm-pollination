@@ -1,0 +1,5 @@
+best.pt old yolov8n weights
+best11.pt new cecilia yolov8n weights
+best12.pt recent cecilia yolov8n weights
+osnet_x1_0.pt reid weights
+best_khu.pt old data yolov8l weights

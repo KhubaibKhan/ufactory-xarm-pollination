@@ -13,7 +13,7 @@
   <include file="$(eval find('xarm' + str(arg('robot_dof')) + '_gripper_moveit_config') + '/launch/realMove_exec.launch')">
     <arg name="robot_ip" value="$(arg robot_ip)" />
     <arg name="report_type" value="$(arg report_type)" />
-    <arg name="show_rviz" value="false"/>
+    <arg name="show_rviz" value="true"/>
     <arg name="no_gui_plan" value="true"/>
     <arg name="xarm_hw_ns" value="$(arg xarm_hw_ns)"/>
     <arg name="velocity_control" value="$(arg velocity_control)"/>
@@ -32,20 +32,24 @@
   </node>
     <!-- <include file="$(find xarm_bringup)/launch/xarm$(arg robot_dof)_server.launch" >
     <arg name="robot_ip" value="$(arg robot_ip)" />
-  </include>
-  <include file="$(find xarm_description)/launch/xarm$(arg robot_dof)_rviz_display.launch" >
+  </include> -->
+  <!-- <include file="$(find xarm_description)/launch/xarm$(arg robot_dof)_rviz_display.launch" >
     <arg name="limited" value="false" />
     <arg name="add_gripper" value="true" />
     <arg name="joint_state_source" value="[xarm/joint_states]"/>
     <arg name="joint_state_publisher_gui" value="false" />
   </include> -->
       <!-- launch realsense camera -->
-  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+  <!-- <include file="$(find realsense2_camera)/launch/rs_camera.launch"> -->
     <!-- <arg name="filters" value="pointcloud" /> -->
-    <arg name="align_depth" value="true" />
+    <!-- <arg name="align_depth" value="true" /> -->
+    <!-- <arg name="publish_tf" value="false" /> -->
     <!-- <arg name="enable_sync" default="true"/> -->
-  </include>
+  <!-- </include> -->
 
+  <include file="$(find azure_kinect_ros_driver)/launch/kinect_rgbd.launch">
+        <param name="overwrite_robot_description" value="false"/>
+  </include>
 
   <!-- <include file="$(find xarm_bringup)/launch/xarm$(arg robot_dof)_server.launch" >
     <arg name="robot_ip" value="$(arg robot_ip)" />

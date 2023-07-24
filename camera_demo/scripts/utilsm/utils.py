@@ -6,10 +6,28 @@ from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped
 import tf2_geometry_msgs
-from yolov5.detect2 import *
+# from yolov5.detect2 import *
+from ultralytics import YOLO
+from boxmot import DeepOCSORT
+from pathlib import Path
 
 # Initialize cv_bridge
 cv_bridge = CvBridge()
+
+# Load the yolo model
+yolo_model = YOLO('/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/weights/best.pt')
+
+# tracker
+# tracker = DeepOCSORT(
+#     model_weights=Path('/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/weights/osnet_x1_0.pt'),
+#     device='cuda:0',
+#     fp16=False,
+# )
+
+# plotting parameters
+color = (255, 255, 255)
+thickness = 2
+fontscale = 0.5
 
 # Realsense class to get aligned image and depth image
 class Realsense:
@@ -97,7 +115,6 @@ class AzureKinect:
     def get_depth(self, depth, image, xc, yc, hw):
         # Convert ROS image to OpenCV image
         cv_depth = cv_bridge.imgmsg_to_cv2(depth, 'passthrough')
-        
         # Convert ROS image to OpenCV image
         cv_image = cv_bridge.imgmsg_to_cv2(image, 'bgr8')
 
@@ -105,14 +122,14 @@ class AzureKinect:
         box_region_depth = cv_depth[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)]
         box_region_color = cv_image[yc - int(hw[1] / 2):yc + int(hw[1] / 2), xc - int(hw[0] / 2):xc + int(hw[0] / 2)]
 
-        # Detect the yellow pixels in the box region
-        lower_yellow = np.array([20, 100, 100])
-        upper_yellow = np.array([30, 255, 255])
-        yellow_mask = cv2.inRange(box_region_color, lower_yellow, upper_yellow)
-        yellow_pixels = np.where(yellow_mask == 255)
+        # # Detect the yellow pixels in the box region
+        # lower_yellow = np.array([20, 100, 100])
+        # upper_yellow = np.array([30, 255, 255])
+        # yellow_mask = cv2.inRange(box_region_color, lower_yellow, upper_yellow)
+        # yellow_pixels = np.where(yellow_mask == 255)
 
         # Get the average depth of the yellow pixels
-        depth = np.mean(box_region_depth[yellow_pixels[0], yellow_pixels[1]])
+        depth = np.mean(box_region_depth)
 
 
         # Return depth
@@ -135,41 +152,71 @@ def detect_color_block(image, color):
     # Convert ROS image to OpenCV image
     cv_image = cv_bridge.imgmsg_to_cv2(image, 'bgr8')
     original_size = cv_image.shape
-    print(original_size)
 
     # resize the image
     cv_image = cv2.resize(cv_image, (640, 480))
     # cv_image = cv2.flip(cv_image, 0)
     # flip the image to match the camera
 
-    xyxy = run(weights="/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/yolov5/best.pt", image=cv_image, imgsz=(640, 480))
+    # xyxy = run(weights="/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/yolov5/best.pt", image=cv_image, imgsz=(640, 480))
+    results = yolo_model(cv_image, imgsz=640, agnostic_nms=True, iou=0.3, conf=0.2, classes=[0, 1, 2, 3, 4, 5, 6, 7, 8])[0]
+    boxes = results.boxes.cpu().numpy()
+    data = boxes.data
     
+    
+    # ts = tracker.update(data, cv_image)                     # update tracker
+    # print("Tracker", ts)
+    # if ts.shape[0] != 0:
+    #     xyxys = ts[:, 0:4].astype('int')
+    #     ids = ts[:, 4].astype('int')
+    #     confs = ts[:, 5]
+    #     clss = ts[:, 6]
+    #     for xyxy, id, conf, cls in zip(xyxys, ids, confs, clss):
+    #         cv_image = cv2.rectangle(
+    #             cv_image,
+    #             (xyxy[0], xyxy[1]),
+    #             (xyxy[2], xyxy[3]),
+    #             color,
+    #             thickness
+    #         )
+    #         cv2.putText(
+    #             cv_image,
+    #             f'{id} {conf:.2f} {cls}',
+    #             (xyxy[0], xyxy[1] - 5),
+    #             cv2.FONT_HERSHEY_SIMPLEX,
+    #             fontscale,
+    #             color,
+    #             thickness
+    #         )
+
     # Draw the xyxy box on the image
-    for box in xyxy:
+    for box in data:
         cv2.rectangle(cv_image, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
-        cv2.putText(cv_image, box[4], (int(box[0]), int(box[1])), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(cv_image, yolo_model.names[box[5]], (int(box[0]), int(box[1])), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        # put the class score on the image
+        # cv2.putText(cv_image, str(box[4]), (int(box[0]), int(box[1]) + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
     # Show image
     cv2.imshow("Image", cv_image)
     cv2.waitKey(1)
 
-    if len(xyxy) == 0:
-        return []
+    # if len(ts) == 0:
+    #     return []
     # Find the center of each xyxy box and also the height and width
     centroids   = []
     hw_list     = []
 
-    for box in xyxy:
+    for box in data:
         xc = int((box[0] + box[2]) / 2)
         yc = int((box[1] + box[3]) / 2)
         # Resize the centroids to the original image size
         xc = int(xc * (original_size[1] / 640))
-        yc = int(yc * (original_size[0] / 480))
+        yc = int(yc * (original_size[0]/480))
 
         hw_list.append([box[2] - box[0], box[3] - box[1]])
         print("hw_list: ", box[2] - box[0], box[3] - box[1])
 
-        centroids.append([xc, yc, box[4], [box[2] - box[0], box[3] - box[1]]])
+        centroids.append([xc, yc, yolo_model.names[box[5]], [box[2] - box[0], box[3] - box[1]], box[4]])
 
     return centroids
 
