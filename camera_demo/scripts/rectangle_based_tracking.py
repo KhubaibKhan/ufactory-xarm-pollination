@@ -33,50 +33,56 @@ else:
     PY3 = True
     import queue
 
+# create a csv file
+data_file = open('/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/exp_results/data.csv', mode='w')
+data_writer = csv.writer(data_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+# write column names as depth, size
+data_writer.writerow(['size', 'depth', 'depth_error', 'actual_depth'])
+
 
 # =======================================================================
 # ============================ ARDUINO CODE =============================
-from pyfirmata import Arduino, util
-import time
-import pyfirmata
+# from pyfirmata import Arduino, util
+# import time
+# import pyfirmata
 
 
-# define pin connections
-dirPin = 9
-stepPin = 8
-switchPin = 2
-Enpin = 7
-stepsPerRevolution = 250  # Modify this according to your actuator's specifications
+# # define pin connections
+# dirPin = 9
+# stepPin = 8
+# switchPin = 2
+# Enpin = 7
+# stepsPerRevolution = 250  # Modify this according to your actuator's specifications
 
-eepromAddress = 0  # Address to store the switch state
-pulseWidth = 600
-NumOfRot = 10
+# eepromAddress = 0  # Address to store the switch state
+# pulseWidth = 600
+# NumOfRot = 10
 
-# connect to the arduino board
-board = Arduino('/dev/ttyACM0')
+# # connect to the arduino board
+# board = Arduino('/dev/ttyACM0')
 
-print("Connection to the board established...")
-# Set the pin modes
-board.digital[dirPin].mode = pyfirmata.OUTPUT
-board.digital[stepPin].mode = pyfirmata.OUTPUT
-board.digital[switchPin].mode = pyfirmata.INPUT
-board.digital[Enpin].mode = pyfirmata.OUTPUT
-board.digital[Enpin].write(0)  # Set Enable pin LOW initially
+# print("Connection to the board established...")
+# # Set the pin modes
+# board.digital[dirPin].mode = pyfirmata.OUTPUT
+# board.digital[stepPin].mode = pyfirmata.OUTPUT
+# board.digital[switchPin].mode = pyfirmata.INPUT
+# board.digital[Enpin].mode = pyfirmata.OUTPUT
+# board.digital[Enpin].write(0)  # Set Enable pin LOW initially
 
-# function to move the motor in the specified direction
-def move_motor(direction):
-    # set motor direction
-    board.digital[dirPin].write(direction)
+# # function to move the motor in the specified direction
+# def move_motor(direction):
+#     # set motor direction
+#     board.digital[dirPin].write(direction)
 
-    for _ in range(NumOfRot * stepsPerRevolution):
-        print("Step number: ", _)
-        board.digital[stepPin].write(1)
-        # time.sleep(pulseWidth / 2000000.0)
-        board.digital[stepPin].write(0)
-        # time.sleep(pulseWidth / 2000000.0)
-        board.digital[stepPin].write(1)
+#     for _ in range(NumOfRot * stepsPerRevolution):
+#         print("Step number: ", _)
+#         board.digital[stepPin].write(1)
+#         # time.sleep(pulseWidth / 2000000.0)
+#         board.digital[stepPin].write(0)
+#         # time.sleep(pulseWidth / 2000000.0)
+#         board.digital[stepPin].write(1)
 
-    time.sleep(1)
+#     time.sleep(1)
 # ============================================================================
 # ============================== ARDUINO SETUP END ===========================
 
@@ -102,11 +108,11 @@ class BoundingBoxAssociator:
         center1 = np.array([box1[0], box1[1]])
         center2 = np.array([box2[0], box2[1]])
         distance = np.linalg.norm(center1 - center2)
-        print("===========================================")
-        print(center1, center2)
-        print("===================================================")
-        print(distance)
-        print("=================================================")
+        # print("===========================================")
+        # print(center1, center2)
+        # print("===================================================")
+        # print(distance)
+        # print("=================================================")
         return distance
 
     def associate_bounding_boxes(self, current_bboxes, previous_bboxes):
@@ -282,7 +288,7 @@ if __name__ == '__main__':
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             # Time taken by deep learning model in seconds
-            print("Time taken by deep learning model: ", time.time() - start, "seconds")
+            # print("Time taken by deep learning model: ", time.time() - start, "seconds")
             if len(centroids) == 0:
                 continue
 
@@ -304,8 +310,9 @@ if __name__ == '__main__':
             # label_reverse = labels_reverse[label]
 
             # get the ratio between the size of the object and the image
-            ratio = find_ratio(image_size, hw)
-            ratio *= 4
+            ratio, size_bbox, ratio_delta = find_ratio(image_size, hw, method='chessboard')
+            ratio *= 40
+            ratio_delta *= 40
 
             # label_ind = labels.keys()[labels.values().index(label)]
             # print("Centroid: ", xc, yc, label)
@@ -351,14 +358,15 @@ if __name__ == '__main__':
                 print(e)
                 exit(0)
 
+            data_writer.writerow([size_bbox, ratio, ratio - ratio_delta, depth])
             print("Ratio of the object and depth of the object: ", ratio, depth)
-
-            print("x, y, z before 3d position: ", xc, yc, depth)
+            # continue
+            # print("x, y, z before 3d position: ", xc, yc, depth)
             # Get the 3D position of the block
             x, y, z = get_3d_position(depth, xc, yc, azure.camera_info)
-            print("x, y, z after 3d position for depth: ", x, y, z)
+            # print("x, y, z after 3d position for depth: ", x, y, z)
             x, y, z = get_3d_position(ratio, xc, yc, azure.camera_info)
-            print("x, y, z after 3d position for ratio: ", x, y, z)
+            # print("x, y, z after 3d position for ratio: ", x, y, z)
 
             # Transform 3D position from camera frame to base frame
             # start = time.time()
@@ -387,11 +395,11 @@ if __name__ == '__main__':
             eef_R = Rotation.from_quat(eef_R).as_matrix()
             # get the rotation matrix from link_base to link_eef
             R = eef_R.dot(base_R.T)
-            print("Rotation matrix: ", R)
+            # print("Rotation matrix: ", R)
             # transform the error from base frame to end effector frame
             pos_error = R.dot(pos_error)
-            print("Pose error after transforming: ", pos_error)
-            print("Time taken by translation error: ", time.time() - start, "seconds")
+            # print("Pose error after transforming: ", pos_error)
+            # print("Time taken by translation error: ", time.time() - start, "seconds")
 
             # if np.linalg.norm(pos_error[-1]) < 0.1: 
             #     pos_error[-1] = 0
@@ -422,7 +430,7 @@ if __name__ == '__main__':
                 error = np.array([0, 0, 0])
             
             # Adjust the distance from the flower to 0.06
-            pos_error[-1] -= 0.04
+            pos_error[-1] -= 0.08
             pos_error[0] -= 0.007
             pos_error[1] -= 0.004
             
@@ -467,6 +475,8 @@ if __name__ == '__main__':
 
             # # compute the PID control signal
             # control_signal = kp * error + ki * integral + kd * derivative
+
+            # continue
 
             
             # control velocity
@@ -534,10 +544,10 @@ if __name__ == '__main__':
             continue
 
         print("Done")
-        # move the motor forward
-        move_motor(1)
-        # move the motor backward
-        move_motor(0)
+        # # move the motor forward
+        # move_motor(1)
+        # # move the motor backward
+        # move_motor(0)
         break
 
     
