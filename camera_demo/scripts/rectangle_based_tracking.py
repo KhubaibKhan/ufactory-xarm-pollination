@@ -33,56 +33,60 @@ else:
     PY3 = True
     import queue
 
+
+name = str(time.time())
 # create a csv file
-data_file = open('/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/exp_results/data.csv', mode='w')
+data_file = open(f'/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/exp_results/{name}.csv', mode='w')
 data_writer = csv.writer(data_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
 # write column names as depth, size
-data_writer.writerow(['size', 'depth', 'depth_error', 'actual_depth'])
+data_writer.writerow(['size', 'depth', 'depth_error', 'actual_depth', 'tr_velocity', 'rot_velocity'])
 
+# create a video writer
+create_videoWriter(name)
 
 # =======================================================================
 # ============================ ARDUINO CODE =============================
-# from pyfirmata import Arduino, util
-# import time
-# import pyfirmata
+from pyfirmata import Arduino, util
+import time
+import pyfirmata
 
 
 # # define pin connections
-# dirPin = 9
-# stepPin = 8
-# switchPin = 2
-# Enpin = 7
-# stepsPerRevolution = 250  # Modify this according to your actuator's specifications
+dirPin = 9
+stepPin = 8
+switchPin = 2
+Enpin = 7
+stepsPerRevolution = 250  # Modify this according to your actuator's specifications
 
-# eepromAddress = 0  # Address to store the switch state
-# pulseWidth = 600
-# NumOfRot = 10
+eepromAddress = 0  # Address to store the switch state
+pulseWidth = 600
+NumOfRot = 10
 
-# # connect to the arduino board
-# board = Arduino('/dev/ttyACM0')
+# connect to the arduino board
+board = Arduino('/dev/ttyACM0')
 
-# print("Connection to the board established...")
-# # Set the pin modes
-# board.digital[dirPin].mode = pyfirmata.OUTPUT
-# board.digital[stepPin].mode = pyfirmata.OUTPUT
-# board.digital[switchPin].mode = pyfirmata.INPUT
-# board.digital[Enpin].mode = pyfirmata.OUTPUT
-# board.digital[Enpin].write(0)  # Set Enable pin LOW initially
+print("Connection to the board established...")
+# Set the pin modes
+board.digital[dirPin].mode = pyfirmata.OUTPUT
+board.digital[stepPin].mode = pyfirmata.OUTPUT
+board.digital[switchPin].mode = pyfirmata.INPUT
+board.digital[Enpin].mode = pyfirmata.OUTPUT
+board.digital[Enpin].write(0)  # Set Enable pin LOW initially
 
-# # function to move the motor in the specified direction
-# def move_motor(direction):
-#     # set motor direction
-#     board.digital[dirPin].write(direction)
+# function to move the motor in the specified direction
+def move_motor(direction):
+    # set motor direction
+    board.digital[dirPin].write(direction)
 
-#     for _ in range(NumOfRot * stepsPerRevolution):
-#         print("Step number: ", _)
-#         board.digital[stepPin].write(1)
-#         # time.sleep(pulseWidth / 2000000.0)
-#         board.digital[stepPin].write(0)
-#         # time.sleep(pulseWidth / 2000000.0)
-#         board.digital[stepPin].write(1)
+    for _ in range(NumOfRot * stepsPerRevolution):
+        print("Step number: ", _)
+        board.digital[stepPin].write(1)
+        # time.sleep(pulseWidth / 2000000.0)
+        board.digital[stepPin].write(0)
+        # time.sleep(pulseWidth / 2000000.0)
+        board.digital[stepPin].write(1)
 
-#     time.sleep(1)
+    time.sleep(1)
 # ============================================================================
 # ============================== ARDUINO SETUP END ===========================
 
@@ -179,9 +183,13 @@ if __name__ == '__main__':
     gripper = GripperCtrl()
     current_pose = arm._commander.get_current_pose().pose
     print("Current pose of the robot: ", current_pose)
+     # Get current joint values
+    current_joints = arm._commander.get_current_joint_values()
+    print("Current joint values: ", current_joints)
+    # exit(0)
 
     # Define an initial pose
-    starting_joints = [-0.0002942924329545349, -0.2688990533351898, -0.6428003907203674, 0.00041848589899018407, 0.9124296307563782, -0.0014197833370417356]
+    starting_joints =   [-0.6726641058921814, -0.6480262279510498, -0.7240388989448547, -0.19731727242469788, 0.9461585283279419, -0.6701903343200684]
     initial_position = [0.12740904092788696, -0.5061454772949219, -0.16231562197208405, 0.06283185631036758, -0.8237953782081604, 0.003490658476948738]
     initial_position2 = [0.17664214968681335, -0.17604023218154907, -1.2110868692398071, -1.0321168899536133, 1.580592155456543, 0.24543769657611847]
     initial_position3 = [-0.004821084439754486, -0.1753533035516739, -1.3093904256820679, 0.049373093992471695, 1.4882516860961914, -1.5750622749328613]
@@ -233,7 +241,7 @@ if __name__ == '__main__':
         # continue
 
         # pid for translational velocity
-        kp_t = 0.5
+        kp_t = 2
         ki_t = 0.01
         kd_t = 0.001
 
@@ -253,15 +261,16 @@ if __name__ == '__main__':
         # time step
         dt = 0.01
         # time step for translational
-        dt_tr = 0.001
+        dt_tr = 0.01
 
         # tolerance for translational error
-        tolerance = 0.004
+        tolerance = 0.006
 
         label_list = []
         # previous angle
         previous_angle = [0, 0, 0]
         previous_label = [0, 0, 0]
+        previous_target_rotation = [0, 0, 0]
 
         # detect boxes
         centroids = detect_color_block(azure.image, color)
@@ -358,7 +367,6 @@ if __name__ == '__main__':
                 print(e)
                 exit(0)
 
-            data_writer.writerow([size_bbox, ratio, ratio - ratio_delta, depth])
             print("Ratio of the object and depth of the object: ", ratio, depth)
             # continue
             # print("x, y, z before 3d position: ", xc, yc, depth)
@@ -415,9 +423,12 @@ if __name__ == '__main__':
             current_rotation = Rotation.from_euler('xyz', current_euler).as_matrix()
             if previous_label == rotation_euler_angles:
                 target_euler = previous_angle
+                target_rotation = previous_target_rotation
+            else:
+                prev_error_rot = [0, 0, 0]
+                target_rotation = Rotation.from_euler('xyz', target_euler).as_matrix()
             previous_label = rotation_euler_angles
             previous_angle = target_euler
-            target_rotation = Rotation.from_euler('xyz', target_euler).as_matrix()
 
             # Calculate the matrix difference between the target and current rotations
             rotation_difference = target_rotation.dot(current_rotation.T)
@@ -429,10 +440,10 @@ if __name__ == '__main__':
             if label == '(0, 0)':
                 error = np.array([0, 0, 0])
             
-            # Adjust the distance from the flower to 0.06
-            pos_error[-1] -= 0.08
-            pos_error[0] -= 0.007
-            pos_error[1] -= 0.004
+            # Adjust the distance from the flower to 0.08
+            pos_error[-1] -= 0.12
+            pos_error[0] -= 0.009
+            pos_error[1] -= 0.02
             
             print("Position error: ", pos_error)
             print("Total error: ", np.linalg.norm(pos_error) + np.linalg.norm(error))
@@ -450,6 +461,8 @@ if __name__ == '__main__':
             # compute the PID control signal
             control_signal_tra = kp_t * pos_error + ki_t * integral_tra + kd_t * derivative
 
+            prev_error_tra = pos_error
+
             # PID for orientation control
             # compute the integral of the error using the trapezoidal rule
             integral_rot = integral_rot + 0.5 * (error + prev_error_rot) * dt
@@ -460,7 +473,7 @@ if __name__ == '__main__':
             # compute the PID control signal
             control_signal_rot = kp_r * error + ki_r * integral_rot + kd_r * derivative
 
-
+            prev_error_rot = error
             # # combine pos error and orientation error in a list
             # error = [pos_error[0], pos_error[1], pos_error[2], error[0], error[1], error[2]]
 
@@ -482,6 +495,8 @@ if __name__ == '__main__':
             # control velocity
             vel = control_signal_tra
             angular_velocity = control_signal_rot
+
+            data_writer.writerow([size_bbox, ratio, ratio - ratio_delta, depth, vel, angular_velocity])
 
             # print("Translational velocity: ", vel)
 
@@ -539,15 +554,31 @@ if __name__ == '__main__':
         time.sleep(1)
 
         cnts += 1
-        
-        if cnts < 0:
-            continue
 
         print("Done")
-        # # move the motor forward
-        # move_motor(1)
-        # # move the motor backward
-        # move_motor(0)
+        input("Press enter to start.....")
+        # move the motor forward
+        move_motor(1)
+        # move the motor backward
+        move_motor(0)
+
+        ret = arm.set_joints(starting_joints, wait=True)
+        # ret = arm.moveto(x=initial_pose[0], y=initial_pose[1], z=initial_pose[2], ox=initial_pose[3], oy=initial_pose[4], oz=initial_pose[5], ow=initial_pose[6], wait=True, relative=False)
+        if ret:
+            print("Go to the initial pose successfully!")
+        else:
+            print("Failed to go to the initial pose!")
+            continue
+
+        success_image = azure.image
+        # convert to cv2_image
+        success_image = azure_image_to_cv2(success_image)
+        # save this image in the folder
+        cv2.imwrite('/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/exp_results/success_image/' + str(time.time()) + '.png', success_image)
+        
+        if cnts < 10:
+            continue
+
         break
 
     
