@@ -40,16 +40,16 @@
     <arg name="joint_state_publisher_gui" value="false" />
   </include> -->
       <!-- launch realsense camera -->
-  <!-- <include file="$(find realsense2_camera)/launch/rs_camera.launch"> -->
-    <!-- <arg name="filters" value="pointcloud" /> -->
-    <!-- <arg name="align_depth" value="true" /> -->
-    <!-- <arg name="publish_tf" value="false" /> -->
-    <!-- <arg name="enable_sync" default="true"/> -->
-  <!-- </include> -->
-
-  <include file="$(find azure_kinect_ros_driver)/launch/kinect_rgbd.launch">
-        <param name="overwrite_robot_description" value="false"/>
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="filters" value="pointcloud" />
+    <arg name="align_depth" value="true" />
+    <arg name="publish_tf" value="false" />
+    <arg name="enable_sync" default="true"/>
   </include>
+
+  <!-- <include file="$(find azure_kinect_ros_driver)/launch/kinect_rgbd.launch">
+        <param name="overwrite_robot_description" value="false"/>
+  </include> -->
 
   <!-- <include file="$(find xarm_bringup)/launch/xarm$(arg robot_dof)_server.launch" >
     <arg name="robot_ip" value="$(arg robot_ip)" />

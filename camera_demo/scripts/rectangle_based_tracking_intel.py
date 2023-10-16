@@ -11,7 +11,7 @@ import numpy as np
 from tuts.gripper_ctrl import GripperCtrl
 from tuts.xarm_ctrl import XArmCtrl
 from utilsm.utils import *
-from utilsm.utils import AzureKinect
+from utilsm.utils import Realsense
 from utilsm.motion_thread import MotionThread
 import warnings
 from numpy.linalg import norm
@@ -97,6 +97,36 @@ create_videoWriter(name)
 # All the possible labels
 # labels = {0: '(0, 0)', 1: '(1, 0)', 2: '(-1, 0)', 3: '(-1, -1)', 4: '(0, 1)', 5: '(0, -1)', 6: '(1, 1)', 7: '(1, -1)', 8: '(-1, 1)'}
 # labels_reverse = {v:k for k,v in labels.items()}
+
+# class PIDController:
+#     def __init__(self, Kp, Ki, Kd, dt):
+#         self.Kp = Kp
+#         self.Ki = Ki
+#         self.Kd = Kd
+#         self.dt = dt
+#         self.prev_error = 0
+#         self.integral = 0
+
+#     def compute(self, setpoint, current_value):
+#         error = setpoint - current_value
+        
+#         # Proportional term
+#         P = self.Kp * error
+        
+#         # Integral term
+#         self.integral += error * self.dt
+#         I = self.Ki * self.integral
+        
+#         # Derivative term
+#         D = self.Kd * (error - self.prev_error) / self.dt
+#         self.prev_error = error
+        
+#         # Calculate control output
+#         control_output = P + I + D
+        
+#         return control_output
+
+
 
 # Desired orientation in quaternions corresponding to the labels
 d_orientations = {'(0, 0)': [0, 0, 0], '(1, 0)': [1.57, 0, 0], '(-1, 0)': [-1.57, 0, 0], '(-1, -1)': [-1.57, 0.78, 0], '(0, 1)': [0, -1.57, 0], '(0, -1)': [0, 1.57, 0], '(1, 1)': [1.57, -0.78, 0], '(1, -1)': [0.78, 1.57, 0], '(-1, 1)': [-0.78, -1.57, 0]}
@@ -193,9 +223,10 @@ if __name__ == '__main__':
     # exit(0)
 
     # Define an initial pose
-    starting_joints = [0.21440628170967102, -0.3760954439640045, -0.5886629819869995, -0.024925874546170235, 0.8663324117660522, 0.2064579576253891]
+    starting_joints = [0.19913798570632935, -0.18164342641830444, -0.23626525700092316, -0.5351921916007996, 0.24083471298217773, 0.6678767800331116]
+    starting_joints4 = [0.21440628170967102, -0.3760954439640045, -0.5886629819869995, -0.024925874546170235, 0.8663324117660522, 0.2064579576253891]
     starting_joints2 = [0.5147331953048706, -0.6630587577819824, -1.4484703540802002, -0.19422030448913574, 1.9430080652236938, 0.3878381848335266]
-    starting_joints3 = [0.47660908102989197, -1.0571871995925903, -0.5194429755210876, -0.17680345475673676, 1.4102486371994019, 0.4494484066963196]
+    starting_joints3 = [0.5118288397789001, -0.6988098621368408, -1.360672116279602, -0.19130946695804596, 1.9157021045684814, 0.3925255537033081]
     initial_position = [0.12740904092788696, -0.5061454772949219, -0.16231562197208405, 0.06283185631036758, -0.8237953782081604, 0.003490658476948738]
     initial_position2 = [0.17664214968681335, -0.17604023218154907, -1.2110868692398071, -1.0321168899536133, 1.580592155456543, 0.24543769657611847]
     initial_position3 = [-0.004821084439754486, -0.1753533035516739, -1.3093904256820679, 0.049373093992471695, 1.4882516860961914, -1.5750622749328613]
@@ -206,7 +237,7 @@ if __name__ == '__main__':
     # color yellow
     color = (0, 255, 255)
     color = (0, 0, 255)
-    azure = AzureKinect()
+    realsense = Realsense()
     cnts = 0
 
     while not rospy.is_shutdown():
@@ -220,7 +251,7 @@ if __name__ == '__main__':
         #     continue
 
         # Go to the initial pose
-        ret = arm.set_joints(starting_joints, wait=True)
+        ret = arm.set_joints(starting_joints3, wait=True)
         # ret = arm.moveto(x=initial_pose[0], y=initial_pose[1], z=initial_pose[2], ox=initial_pose[3], oy=initial_pose[4], oz=initial_pose[5], ow=initial_pose[6], wait=True, relative=False)
         if ret:
             print("Go to the initial pose successfully!")
@@ -249,16 +280,19 @@ if __name__ == '__main__':
         # continue
 
         # pid for translational velocity
-        kp_t = 1
+        kp_t = 1.4
         ki_t = 0.01
         kd_t = 0.001
+        dt = 0.01
+
+        # pid_tr = PIDController(kp_t, ki_t, kd_t, dt)
 
         error_tra = np.array([0, 0, 0])
         prev_error_tra = np.array([0, 0, 0])
         integral_tra = np.array([0, 0, 0])
 
         # pid for rotational velocity
-        kp_r = 0.4
+        kp_r = 0.3
         ki_r = 0.01
         kd_r = 0.001
 
@@ -279,9 +313,8 @@ if __name__ == '__main__':
         previous_angle = [0, 0, 0]
         previous_label = [0, 0, 0]
         previous_target_rotation = Rotation.from_euler('xyz', [0, 0, 0]).as_matrix()
-
         # detect boxes
-        centroids = detect_color_block(azure.image, azure.depth, color, azure.camera_info, azure.depth_camera_info)
+        centroids = detect_color_block(realsense.image, realsense.depth, color, realsense.camera_info)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
         if len(centroids) == 0:
@@ -301,9 +334,9 @@ if __name__ == '__main__':
         while(True):
             print("start")
             start = time.time()
-            rgb_image = azure.image
-            depth_image = azure.depth
-            centroids = detect_color_block(rgb_image, depth_image, color, azure.camera_info, azure.depth_camera_info)
+            rgb_image = realsense.image
+            depth_image = realsense.depth
+            centroids = detect_color_block(rgb_image, depth_image, color, realsense.camera_info)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             # Time taken by deep learning model in seconds
@@ -331,7 +364,7 @@ if __name__ == '__main__':
             # label_reverse = labels_reverse[label]
 
             # get the ratio between the size of the object and the image
-            ratio, size_bbox, ratio_delta = find_ratio(image_size, hw, method='diagonal')
+            ratio, size_bbox, ratio_delta = find_ratio(image_size, hw, method='chessboard')
             ratio *= 40
             ratio_delta *= 40
 
@@ -344,14 +377,14 @@ if __name__ == '__main__':
             # if label_reverse == 0:
             #     time.sleep(30)
             #     continue
-            if len(label_list) > 4:
+            if len(label_list) > 10:
                 label_list.pop(0)
             else:
                 continue
 
             label = max(set(label_list), key=label_list.count)
 
-            # if label_reverse == 0:
+            # if label_reverse == 0: 
             #     break
 
             # current camera pose
@@ -380,7 +413,7 @@ if __name__ == '__main__':
             target_euler = Rotation.from_matrix(resulting_rotation).as_euler('xyz')
 
             try:
-                depth = azure.get_depth(depth_image, rgb_image, xc, yc, hw)
+                depth = realsense.get_depth(depth_image, rgb_image, xc, yc, hw)
             except Exception as e:
                 print(e)
                 exit(0)
@@ -388,10 +421,11 @@ if __name__ == '__main__':
             print("Ratio of the object and depth of the object: ", ratio, depth)
             # continue
             # print("x, y, z before 3d position: ", xc, yc, depth)
-            # Get the 3D position of the block
-            x, y, z = get_3d_position(depth, xc, yc, azure.camera_info)
+            
             # print("x, y, z after 3d position for depth: ", x, y, z)
-            x, y, z = get_3d_position(ratio, xc, yc, azure.camera_info)
+            x, y, z = get_3d_position(ratio, xc, yc, realsense.camera_info)
+            # Get the 3D position of the block
+            x, y, z = get_3d_position(depth, xc, yc, realsense.camera_info)
             # print("x, y, z after 3d position for ratio: ", x, y, z)
 
             # Transform 3D position from camera frame to base frame
@@ -462,14 +496,14 @@ if __name__ == '__main__':
                 error = np.array([0, 0, 0])
             
             # Adjust the distance from the flower to 0.08
-            pos_error[-1] -= 0.10
-            pos_error[0] -= 0.009
-            pos_error[1] -= 0.02
+            pos_error[-1] -= 0.07
+            # pos_error[0] -= 0.009
+            # pos_error[1] -= 0.02
             
             print("Position error: ", pos_error)
             print("Rotational error: ", error)
             # print("Total error: ", np.linalg.norm(pos_error) + np.linalg.norm(error))
-            if np.linalg.norm(pos_error) + np.linalg.norm(error) < tolerance and pos_error[-1] > 0:
+            if np.linalg.norm(pos_error) + np.linalg.norm(error) < tolerance:
                 data_writer.writerow([size_bbox, ratio, ratio - ratio_delta, depth, vel, angular_velocity, current_position, current_euler, target_position, target_euler, pos_error, error, np.linalg.norm(pos_error) + np.linalg.norm(error), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())), hw])
                 # time.sleep(20)
                 break
@@ -588,7 +622,7 @@ if __name__ == '__main__':
         # move_motor(1)
 
         # save success_image
-        save_success_image(azure.image, f'/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/exp_results/success_image/{name}/' + str(time.time()) + '.png')
+        save_success_image(realsense.image, f'/home/vision/catkin_ws/src/xarm_ros/xarm_vision/camera_demo/scripts/exp_results/success_image/{name}/' + str(time.time()) + '.png')
         # success_image = azure.image
         # # convert to cv2_image
         # success_image = azure_image_to_cv2(success_image)
@@ -599,12 +633,12 @@ if __name__ == '__main__':
         # move_motor(0)
 
         # if cnts < 5:
-        input("Press enter to start....................")
+        # input("Press enter to start....................")
         
-        if cnts < 50:
+        if cnts < 10:
             continue
 
-        ret = arm.set_joints(starting_joints, wait=True)
+        ret = arm.set_joints(starting_joints3, wait=True)
         # ret = arm.moveto(x=initial_pose[0], y=initial_pose[1], z=initial_pose[2], ox=initial_pose[3], oy=initial_pose[4], oz=initial_pose[5], ow=initial_pose[6], wait=True, relative=False)
         if ret:
             print("Go to the initial pose successfully!")

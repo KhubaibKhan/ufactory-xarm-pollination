@@ -24,6 +24,8 @@ from scipy.spatial.transform import Rotation
 import tf
 import transforms3d as tf3d
 import csv
+import pyk4a
+from pyk4a import Config, PyK4A
 
 warnings.filterwarnings("ignore")
 
@@ -173,6 +175,17 @@ if __name__ == '__main__':
     # Initialize OpenCV bridge
     dof = rospy.get_param('/xarm/DOF')
 
+    # initialize the camera
+    k4a = PyK4A(
+        Config(
+            color_resolution=pyk4a.ColorResolution.RES_720P,
+            camera_fps=pyk4a.FPS.FPS_5,
+            depth_mode=pyk4a.DepthMode.WFOV_2X2BINNED,
+            synchronized_images_only=True,
+        )
+    )
+    k4a.start()
+
     rate = rospy.Rate(10.0)
     # motion_que.put([318, 50, 461, -2.96, -0.314, -0.27])
 
@@ -193,9 +206,7 @@ if __name__ == '__main__':
     # exit(0)
 
     # Define an initial pose
-    starting_joints = [0.21440628170967102, -0.3760954439640045, -0.5886629819869995, -0.024925874546170235, 0.8663324117660522, 0.2064579576253891]
-    starting_joints2 = [0.5147331953048706, -0.6630587577819824, -1.4484703540802002, -0.19422030448913574, 1.9430080652236938, 0.3878381848335266]
-    starting_joints3 = [0.47660908102989197, -1.0571871995925903, -0.5194429755210876, -0.17680345475673676, 1.4102486371994019, 0.4494484066963196]
+    starting_joints =   [0.3169117867946625, -0.7092766761779785, -0.33921676874160767, -0.19206951558589935, 0.8635095953941345, 0.38769733905792236]
     initial_position = [0.12740904092788696, -0.5061454772949219, -0.16231562197208405, 0.06283185631036758, -0.8237953782081604, 0.003490658476948738]
     initial_position2 = [0.17664214968681335, -0.17604023218154907, -1.2110868692398071, -1.0321168899536133, 1.580592155456543, 0.24543769657611847]
     initial_position3 = [-0.004821084439754486, -0.1753533035516739, -1.3093904256820679, 0.049373093992471695, 1.4882516860961914, -1.5750622749328613]
@@ -206,10 +217,11 @@ if __name__ == '__main__':
     # color yellow
     color = (0, 255, 255)
     color = (0, 0, 255)
-    azure = AzureKinect()
+    # azure = AzureKinect()
     cnts = 0
 
     while not rospy.is_shutdown():
+        capture = k4a.get_capture()
         rate.sleep()
 
         data_writer.writerow([f'size{cnts}', f'depth{cnts}', f'depth_error{cnts}', f'actual_depth{cnts}', f'tr_velocity{cnts}', f'rot_velocity{cnts}', f'3dPositions{cnts}', f'current_orientation{cnts}', f'target_position{cnts}', f'target_orientation{cnts}', f'pos_error{cnts}', f'or_error{cnts}', f'total_error{cnts}', f'time{cnts}', f'hw{cnts}'])
@@ -249,7 +261,7 @@ if __name__ == '__main__':
         # continue
 
         # pid for translational velocity
-        kp_t = 1
+        kp_t = 2
         ki_t = 0.01
         kd_t = 0.001
 
@@ -281,7 +293,7 @@ if __name__ == '__main__':
         previous_target_rotation = Rotation.from_euler('xyz', [0, 0, 0]).as_matrix()
 
         # detect boxes
-        centroids = detect_color_block(azure.image, azure.depth, color, azure.camera_info, azure.depth_camera_info)
+        centroids = detect_color_block(capture.color, capture.transformed_depth, color)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
         if len(centroids) == 0:
@@ -300,10 +312,9 @@ if __name__ == '__main__':
         start_of_time = time.time()
         while(True):
             print("start")
+            capture = k4a.get_capture()
             start = time.time()
-            rgb_image = azure.image
-            depth_image = azure.depth
-            centroids = detect_color_block(rgb_image, depth_image, color, azure.camera_info, azure.depth_camera_info)
+            centroids = detect_color_block(capture.color, capture.transformed_depth, color)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             # Time taken by deep learning model in seconds
@@ -331,7 +342,7 @@ if __name__ == '__main__':
             # label_reverse = labels_reverse[label]
 
             # get the ratio between the size of the object and the image
-            ratio, size_bbox, ratio_delta = find_ratio(image_size, hw, method='diagonal')
+            ratio, size_bbox, ratio_delta = find_ratio(image_size, hw, method='chessboard')
             ratio *= 40
             ratio_delta *= 40
 
@@ -380,12 +391,13 @@ if __name__ == '__main__':
             target_euler = Rotation.from_matrix(resulting_rotation).as_euler('xyz')
 
             try:
-                depth = azure.get_depth(depth_image, rgb_image, xc, yc, hw)
+                # depth = azure.get_depth(azure.depth, azure.image, xc, yc, hw)
+                depth = get_depth(capture.transformed_depth, capture.color, xc, yc, hw)
             except Exception as e:
                 print(e)
                 exit(0)
 
-            print("Ratio of the object and depth of the object: ", ratio, depth)
+            # print("Ratio of the object and depth of the object: ", ratio, depth)
             # continue
             # print("x, y, z before 3d position: ", xc, yc, depth)
             # Get the 3D position of the block
@@ -559,8 +571,6 @@ if __name__ == '__main__':
             twist_stamped.twist.angular.z = angular_velocity[2]
 
             twist_pub.publish(twist_stamped)
-
-            print("One loop time: ", str(time.time() - start))
             
             
         
@@ -598,8 +608,8 @@ if __name__ == '__main__':
         # move the motor backward
         # move_motor(0)
 
-        # if cnts < 5:
-        input("Press enter to start....................")
+        if cnts < 5:
+            input("Press enter to start....................")
         
         if cnts < 50:
             continue
